@@ -15,27 +15,24 @@ function obtenerSecret(): Uint8Array {
 }
 
 export type PayloadClaveOk = {
+	modo: "grupo";
 	grupoTokenId: string;
 	grupo: string;
 	grado: string;
-	/** Clave tal como en padrón (solo para mostrar en UI tras validar). */
 	claveAcceso?: string;
 };
 
-export type PayloadAlumno = {
-	cuentaId: string;
-	padronId: string;
-	nombreCompleto: string;
-	grupo: string;
-	grado: string;
-};
-
 export async function firmarTokenClaveOk(payload: PayloadClaveOk): Promise<string> {
-	return new SignJWT({
+	const cuerpo: Record<string, unknown> = {
+		modo: "grupo",
 		grupoTokenId: payload.grupoTokenId,
 		grupo: payload.grupo,
 		grado: payload.grado,
-	})
+	};
+	if (payload.claveAcceso != null && payload.claveAcceso !== "") {
+		cuerpo.claveAcceso = payload.claveAcceso;
+	}
+	return new SignJWT(cuerpo)
 		.setProtectedHeader({ alg: ALG })
 		.setIssuedAt()
 		.setExpirationTime("30m")
@@ -45,6 +42,11 @@ export async function firmarTokenClaveOk(payload: PayloadClaveOk): Promise<strin
 export async function verificarTokenClaveOk(token: string): Promise<PayloadClaveOk> {
 	const { payload } = await jwtVerify(token, obtenerSecret(), { algorithms: [ALG] });
 	const p = payload as JWTPayload & Record<string, unknown>;
+	const claveAcceso =
+		typeof p.claveAcceso === "string" && p.claveAcceso !== "" ? p.claveAcceso : undefined;
+	if (p.modo === "carga") {
+		throw new Error("Token de clave obsoleto (modo carga); vuelve a validar tu clave de grupo.");
+	}
 	const grupoTokenId = p.grupoTokenId;
 	const grupo = p.grupo;
 	const grado = p.grado;
@@ -55,10 +57,16 @@ export async function verificarTokenClaveOk(token: string): Promise<PayloadClave
 	) {
 		throw new Error("Token de clave inválido");
 	}
-	const claveAcceso =
-		typeof p.claveAcceso === "string" ? p.claveAcceso : undefined;
-	return { grupoTokenId, grupo, grado, claveAcceso };
+	return { modo: "grupo", grupoTokenId, grupo, grado, claveAcceso };
 }
+
+export type PayloadAlumno = {
+	cuentaId: string;
+	padronId: string;
+	nombreCompleto: string;
+	grupo: string;
+	grado: string;
+};
 
 export async function firmarTokenAlumno(payload: PayloadAlumno): Promise<string> {
 	return new SignJWT({

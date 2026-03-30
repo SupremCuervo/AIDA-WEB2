@@ -16,6 +16,15 @@ function limpiarNombre(v: unknown): string {
 	return typeof v === "string" ? v.trim().replace(/\s+/g, " ") : "";
 }
 
+function refExpedienteLog(matricula: string | null | undefined, padronId: string): string {
+	const m = typeof matricula === "string" ? matricula.trim() : "";
+	if (m !== "") {
+		return m;
+	}
+	const s = padronId.replace(/-/g, "");
+	return s.length <= 4 ? s : s.slice(-4);
+}
+
 export async function PATCH(
 	request: Request,
 	ctx: { params: Promise<{ padronId: string }> },
@@ -36,6 +45,7 @@ export async function PATCH(
 		gradoAlumno?: string | null;
 		carreraId?: string | null;
 		matricula?: string | null;
+		estadoExpediente?: string;
 	};
 	try {
 		cuerpo = (await request.json()) as {
@@ -44,6 +54,7 @@ export async function PATCH(
 			gradoAlumno?: string | null;
 			carreraId?: string | null;
 			matricula?: string | null;
+			estadoExpediente?: string;
 		};
 	} catch {
 		return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
@@ -55,6 +66,7 @@ export async function PATCH(
 	const tocaGrado = Object.prototype.hasOwnProperty.call(cuerpo, "gradoAlumno");
 	const tocaCarrera = Object.prototype.hasOwnProperty.call(cuerpo, "carreraId");
 	const tocaMatricula = Object.prototype.hasOwnProperty.call(cuerpo, "matricula");
+	const tocaEstado = Object.prototype.hasOwnProperty.call(cuerpo, "estadoExpediente");
 
 	let gradoAlumnoDb: string | null | undefined;
 	if (tocaGrado) {
@@ -83,11 +95,20 @@ export async function PATCH(
 		matriculaNorm = m;
 	}
 
-	if (!nombreNuevo && !destino && !tocaGrado && !tocaCarrera && !tocaMatricula) {
+	let estadoNorm: "activo" | "inactivo" | null = null;
+	if (tocaEstado) {
+		const raw = typeof cuerpo.estadoExpediente === "string" ? cuerpo.estadoExpediente.trim().toLowerCase() : "";
+		if (raw !== "activo" && raw !== "inactivo") {
+			return NextResponse.json({ error: "estadoExpediente debe ser activo o inactivo" }, { status: 400 });
+		}
+		estadoNorm = raw;
+	}
+
+	if (!nombreNuevo && !destino && !tocaGrado && !tocaCarrera && !tocaMatricula && !tocaEstado) {
 		return NextResponse.json(
 			{
 				error:
-					"Indica nombreCompleto, grupoTokenIdDestino, gradoAlumno, carreraId y/o matricula",
+					"Indica nombreCompleto, grupoTokenIdDestino, gradoAlumno, carreraId, matricula y/o estadoExpediente",
 			},
 			{ status: 400 },
 		);
@@ -193,15 +214,22 @@ export async function PATCH(
 
 		const actualizacion: {
 			nombre_completo?: string;
-			grupo_token_id?: string;
+			grupo_token_id?: string | null;
+			institucion_grupo_id?: string | null;
 			grado_alumno?: string | null;
 			carrera_id?: string | null;
 			matricula?: string | null;
+			archivo_muerto_en?: string | null;
 		} = {};
+
+		if (tocaEstado && estadoNorm) {
+			actualizacion.archivo_muerto_en = estadoNorm === "activo" ? null : new Date().toISOString();
+		}
 
 		if (nombreNuevo || destino) {
 			actualizacion.nombre_completo = nombreFinal;
-			actualizacion.grupo_token_id = grupoFinal;
+			actualizacion.grupo_token_id = grupoTokenDestino;
+			actualizacion.institucion_grupo_id = institucionGrupoDestino;
 		}
 		if (tocaGrado) {
 			actualizacion.grado_alumno = gradoAlumnoDb ?? null;
@@ -232,6 +260,28 @@ export async function PATCH(
 			return NextResponse.json({ error: "No se pudo actualizar" }, { status: 500 });
 		}
 
+		const soloCambioEstado =
+			tocaEstado &&
+			estadoNorm &&
+			!nombreNuevo &&
+			!destino &&
+			!tocaGrado &&
+			!tocaCarrera &&
+			!tocaMatricula;
+		if (soloCambioEstado) {
+			const ref = refExpedienteLog(actual.matricula, padronId);
+			await registrarLogApi({
+				orientador,
+				accion:
+					estadoNorm === "activo"
+						? `Reactivación de expediente ${ref}`
+						: `Expediente ${ref} pasado a archivo muerto`,
+				entidad: "padron_alumnos",
+				entidadId: padronId,
+				detalle: { estado_expediente: estadoNorm },
+			});
+		}
+
 		return NextResponse.json({
 			ok: true,
 			padronId,
@@ -241,6 +291,7 @@ export async function PATCH(
 			...(tocaGrado ? { gradoAlumno: gradoAlumnoDb } : {}),
 			...(tocaCarrera && carreraNorm ? { carreraId: carreraNorm.valor } : {}),
 			...(tocaMatricula && matriculaNorm ? { matricula: matriculaNorm.valor } : {}),
+			...(tocaEstado && estadoNorm ? { estadoExpediente: estadoNorm } : {}),
 		});
 	} catch (e) {
 		console.error("padron PATCH", e);
@@ -266,7 +317,7 @@ export async function DELETE(
 		const supabase = obtenerClienteSupabaseAdmin();
 		const { data: fila, error: errQ } = await supabase
 			.from("padron_alumnos")
-			.select("id, nombre_completo, grupo_token_id")
+			.select("id, nombre_completo, grupo_token_id, matricula")
 			.eq("id", padronId)
 			.maybeSingle();
 		if (errQ || !fila) {
@@ -277,9 +328,10 @@ export async function DELETE(
 			console.error("padron DELETE", error);
 			return NextResponse.json({ error: "No se pudo eliminar" }, { status: 500 });
 		}
+		const refDel = refExpedienteLog(fila.matricula, padronId);
 		await registrarLogApi({
 			orientador,
-			accion: "ELIMINAR_PADRON",
+			accion: `Eliminación de expediente ${refDel} (${fila.nombre_completo})`,
 			entidad: "padron_alumnos",
 			entidadId: padronId,
 			detalle: {

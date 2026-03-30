@@ -12,6 +12,8 @@
 begin;
 
 -- Tablas (orden: dependientes primero). CASCADE quita triggers e índices.
+drop table if exists public.carga_alumnos_linea cascade;
+drop table if exists public.cargas_alumnos cascade;
 drop table if exists public.periodo_institucion_grupos cascade;
 drop table if exists public.entregas_documento_alumno cascade;
 drop table if exists public.cuentas_alumno cascade;
@@ -30,6 +32,7 @@ drop function if exists public.registrar_log(text, uuid, text, text, text, text,
 drop function if exists public.aud_archivar_padrones(uuid[], uuid, text, uuid, text) cascade;
 drop function if exists public.aud_reactivar_padron(uuid, text, uuid, text) cascade;
 drop function if exists public.logs_trigger_auditoria_fila() cascade;
+drop function if exists public.logs_ref_expediente_padron(uuid, text) cascade;
 
 commit;
 

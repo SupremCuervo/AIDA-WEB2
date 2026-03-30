@@ -43,7 +43,7 @@ export async function DELETE(
 
 		await registrarLogApi({
 			orientador,
-			accion: "ELIMINAR_PLANTILLA",
+			accion: `Plantilla eliminada: ${fila.titulo || fila.nombre_archivo || plantillaId}`,
 			entidad: "orientador_plantillas",
 			entidadId: plantillaId,
 			detalle: {

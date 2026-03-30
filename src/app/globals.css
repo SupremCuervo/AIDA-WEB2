@@ -11,3 +11,18 @@ body {
 	color: var(--foreground);
 	background: var(--background);
 }
+
+@keyframes orientador-panel-seccion-entra {
+	from {
+		opacity: 0;
+		transform: translateY(12px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.orientador-panel-seccion-animada {
+	animation: orientador-panel-seccion-entra 0.38s ease-out;
+}

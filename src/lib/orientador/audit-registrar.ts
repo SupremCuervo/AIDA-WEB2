@@ -3,11 +3,11 @@ import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 
 function etiquetaActorOrientador(o: PayloadOrientador): string {
 	const n = o.nombre.trim();
-	const e = o.email.trim();
-	if (n && e) {
-		return `${n} <${e}>`;
+	if (n !== "") {
+		return n;
 	}
-	return e || n || o.orientadorId;
+	const e = o.email.trim();
+	return e !== "" ? e : o.orientadorId;
 }
 
 /** Inserta en public.logs vía RPC (service_role). No lanza: errores solo a consola. */

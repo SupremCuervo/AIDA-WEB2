@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -10,6 +9,7 @@ import {
 	IconoLlave,
 	IconoUsuario,
 } from "@/app/alumno/aida-iconos";
+import { gradoEtiquetaParaVistaAlumno } from "@/lib/padron/grado-alumno";
 
 type Paso = "cargando" | "clave" | "cuenta";
 type AyudaModal = null | "nombre" | "contrasena";
@@ -48,12 +48,12 @@ export default function FlujoAlumno() {
 				grado?: string;
 				claveAcceso?: string;
 			};
-			if (p.claveValidada && p.grupo && p.grado) {
-				setGrupo(p.grupo);
+			if (p.claveValidada && p.grado && p.grupo) {
 				setGrado(p.grado);
 				if (p.claveAcceso) {
 					setClave(p.claveAcceso);
 				}
+				setGrupo(p.grupo);
 				setPaso("cuenta");
 				return;
 			}
@@ -91,13 +91,17 @@ export default function FlujoAlumno() {
 				credentials: "include",
 				body: JSON.stringify({ clave: clave.trim() }),
 			});
-			const data = (await res.json()) as { grupo?: string; grado?: string; error?: string };
+			const data = (await res.json()) as {
+				grupo?: string;
+				grado?: string;
+				error?: string;
+			};
 			if (!res.ok) {
 				setErrorClave(data.error ?? "No se pudo validar la clave");
 				return;
 			}
-			setGrupo(data.grupo ?? "");
 			setGrado(data.grado ?? "");
+			setGrupo(data.grupo ?? "");
 			setPaso("cuenta");
 		} catch {
 			setErrorClave("Error de red. Intenta de nuevo.");
@@ -142,13 +146,13 @@ export default function FlujoAlumno() {
 	}
 
 	return (
-		<div className="min-h-screen bg-[#FFFFFF] bg-gradient-to-br from-[#EFF6FF] via-[#FFFFFF] to-[#F5F3FF] px-4 py-8 sm:py-12">
-			<div className="mx-auto max-w-lg">
+		<div className="min-h-screen bg-[#FFFFFF] bg-gradient-to-br from-[#EFF6FF] via-[#FFFFFF] to-[#F5F3FF] px-4 py-8 sm:py-10 lg:py-12">
+			<div className="mx-auto max-w-6xl">
 				<Link
 					href="/"
-					className="inline-flex items-center gap-1.5 text-sm font-medium text-[#2563EB] transition hover:text-[#1D4ED8]"
+					className="inline-flex items-center gap-2.5 rounded-full border border-[#DBEAFE] bg-white/80 px-4 py-2 text-base font-semibold text-[#1D4ED8] shadow-sm transition hover:border-[#BFDBFE] hover:bg-white hover:text-[#1E40AF] sm:text-lg"
 				>
-					<span aria-hidden>←</span> Volver al inicio
+					<span>Volver al inicio</span>
 				</Link>
 			</div>
 
@@ -165,31 +169,30 @@ export default function FlujoAlumno() {
 			)}
 
 			{paso !== "cargando" ? (
-				<div className="mx-auto mt-6 max-w-lg overflow-hidden rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] shadow-xl shadow-[#2563EB]/10">
-					<div className="bg-gradient-to-r from-[#2563EB] via-[#3B82F6] to-[#7C3AED] px-6 py-8 text-white">
-						<div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-							<div className="min-w-0 flex-1">
-								<p className="text-xs font-semibold uppercase tracking-wider text-white/90">Acceso alumno</p>
-								<h1 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Entra a tu expediente</h1>
-								<p className="mt-3 max-w-md text-sm leading-relaxed text-white/95">
-									Primero valida la clave que te dio el orientador; después podrás escribir tu nombre con mayúsculas y
-									tu contraseña.
-								</p>
-							</div>
+				<div className="mx-auto mt-6 max-w-6xl overflow-hidden rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] shadow-xl shadow-[#2563EB]/10">
+					{/* Cabecera a todo el ancho */}
+					<div className="bg-gradient-to-r from-[#2563EB] via-[#3B82F6] to-[#7C3AED] px-6 py-8 text-white lg:px-10 lg:py-10">
+						<div className="mx-auto max-w-4xl text-center">
+							<h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
+								Entra a tu expediente
+							</h1>
+							<p className="mx-auto mt-5 max-w-3xl text-base font-bold leading-relaxed text-white sm:text-lg lg:text-xl">
+								Primero valida la clave que te dio el orientador; después podrás escribir tu nombre con mayúsculas y
+								tu contraseña.
+							</p>
 						</div>
 					</div>
 
-					<div className="space-y-0 divide-y divide-[#E2E8F0] bg-[#FFFFFF]">
-						{/* Clave: siempre visible */}
-						<section className="p-6">
-							<div className="flex items-start gap-3">
-								<span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#DBEAFE] text-[#2563EB]">
+					{/* Dos columnas en escritorio: clave | identidad */}
+					<div className="grid grid-cols-1 bg-[#FFFFFF] lg:grid-cols-2 lg:gap-0">
+						<section className="flex min-h-[min(420px,70vh)] flex-col justify-center border-b border-[#E2E8F0] p-6 sm:p-8 lg:min-h-[min(480px,72vh)] lg:border-b-0 lg:border-r lg:border-[#E2E8F0]">
+							<div className="mx-auto flex w-full max-w-md flex-col items-center text-center lg:max-w-none">
+								<span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#DBEAFE] text-[#2563EB]">
 									<IconoLlave className="h-5 w-5" />
 								</span>
-								<div className="min-w-0 flex-1">
-									<h2 className="text-base font-semibold text-[#1E293B]">Clave de acceso</h2>
-									<p className="mt-1 text-sm text-[#64748B]">Identifica tu grupo en el sistema.</p>
-									<form onSubmit={enviarClave} className="mt-4 space-y-3">
+								<h2 className="mt-4 text-lg font-semibold text-[#1E293B]">Clave de acceso</h2>
+								<p className="mt-1 text-sm text-[#64748B]">Identifica tu grupo en el sistema.</p>
+								<form onSubmit={enviarClave} className="mt-5 w-full space-y-3 text-left">
 										<label htmlFor="aida-clave" className="sr-only">
 											Clave de acceso
 										</label>
@@ -227,102 +230,116 @@ export default function FlujoAlumno() {
 												{cargando ? "Validando…" : "Validar clave"}
 											</button>
 										) : (
-											<div className="flex items-center gap-2 rounded-xl border border-[#7C3AED]/25 bg-[#F5F3FF] px-4 py-3 text-sm font-medium text-[#6D28D9]">
+											<div className="flex flex-col gap-2 rounded-xl border border-[#7C3AED]/25 bg-[#F5F3FF] px-4 py-3 text-sm font-medium text-[#6D28D9] sm:flex-row sm:items-center">
 												<IconoCheck className="h-5 w-5 shrink-0 text-[#7C3AED]" />
-												Clave correcta — ya puedes completar tus datos abajo.
+												<span>
+													Clave correcta — ya puedes completar tus datos{" "}
+													<span className="lg:hidden">abajo</span>
+													<span className="hidden lg:inline">a la derecha</span>.
+												</span>
 											</div>
 										)}
-									</form>
-								</div>
+								</form>
 							</div>
 						</section>
 
-						{/* Cuenta: mismo panel; bloqueado hasta validar */}
 						<section
-							className={`relative p-6 transition ${!claveYaValidada ? "opacity-[0.42]" : ""}`}
+							className={`relative flex min-h-[min(420px,70vh)] flex-col justify-center p-6 sm:p-8 lg:min-h-[min(480px,72vh)] ${!claveYaValidada ? "opacity-[0.42]" : ""} transition`}
 						>
 							{!claveYaValidada ? (
-								<p className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center rounded-xl bg-[#F8FAFC]/80 p-4 text-center text-sm font-medium text-[#64748B] backdrop-blur-[1px]">
-									Valida tu clave arriba para habilitar nombre y contraseña.
+								<p className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center bg-[#F8FAFC]/85 p-6 text-center text-base font-medium leading-relaxed text-[#64748B] backdrop-blur-[2px] sm:text-lg lg:p-8">
+									<span className="max-w-sm sm:max-w-md">
+										Valida tu clave en el panel{" "}
+										<span className="lg:hidden">de arriba</span>
+										<span className="hidden lg:inline">izquierdo</span> para habilitar nombre y contraseña.
+									</span>
 								</p>
 							) : null}
-							<div className={`flex items-start gap-3 ${!claveYaValidada ? "pointer-events-none" : ""}`}>
-								<span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#EDE9FE] text-[#7C3AED]">
+							<div
+								className={`mx-auto flex w-full max-w-md flex-col items-center text-center lg:max-w-none ${!claveYaValidada ? "pointer-events-none" : ""}`}
+							>
+								<span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#EDE9FE] text-[#7C3AED]">
 									<IconoUsuario className="h-5 w-5" />
 								</span>
-								<div className="min-w-0 flex-1">
-									<h2 className="text-base font-semibold text-[#1E293B]">Tu identidad</h2>
-									<p className="mt-1 text-sm text-[#64748B]">
-										Grado <span className="font-semibold text-[#1E293B]">{grado || "—"}</span> · Grupo{" "}
-										<span className="font-semibold text-[#1E293B]">{grupo || "—"}</span>
-									</p>
-									<form onSubmit={enviarCuenta} className="mt-4 space-y-3">
-										<div className="flex items-center gap-2">
-											<span className="shrink-0 text-[#64748B]" title="Nombre completo">
-												<IconoUsuario className="h-4 w-4" />
-											</span>
-											<label htmlFor="aida-nombre" className="sr-only">
-												Nombre completo
-											</label>
-											<input
-												id="aida-nombre"
-												type="text"
-												autoComplete="name"
-												className="min-w-0 flex-1 rounded-xl border border-[#E2E8F0] bg-white px-4 py-3 text-[#1E293B] outline-none placeholder:text-[#94A3B8] focus:border-[#2563EB] focus:ring-2 focus:ring-[#DBEAFE] disabled:bg-[#F1F5F9]"
-												placeholder="Nombre completo"
-												value={nombreCompleto}
-												onChange={(e) => setNombreCompleto(e.target.value)}
-												disabled={cargando || !claveYaValidada}
-											/>
-											<button
-												type="button"
-												onClick={() => setAyudaModal("nombre")}
-												className="pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-sm font-bold text-[#2563EB] outline-none transition hover:border-[#DBEAFE] hover:bg-[#EFF6FF] focus-visible:ring-2 focus-visible:ring-[#2563EB]/30"
-												aria-label="Ayuda: cómo escribir tu nombre completo"
-											>
-												?
-											</button>
-										</div>
-										<div className="flex items-center gap-2">
-											<span className="shrink-0 text-[#64748B]" title="Contraseña">
-												<IconoCandado className="h-4 w-4" />
-											</span>
-											<label htmlFor="aida-pass" className="sr-only">
-												Contraseña
-											</label>
-											<input
-												id="aida-pass"
-												type="password"
-												autoComplete="new-password"
-												className="min-w-0 flex-1 rounded-xl border border-[#E2E8F0] bg-white px-4 py-3 text-[#1E293B] outline-none placeholder:text-[#94A3B8] focus:border-[#2563EB] focus:ring-2 focus:ring-[#DBEAFE] disabled:bg-[#F1F5F9]"
-												placeholder="Contraseña (crear o la que ya usas)"
-												value={password}
-												onChange={(e) => setPassword(e.target.value)}
-												disabled={cargando || !claveYaValidada}
-											/>
-											<button
-												type="button"
-												onClick={() => setAyudaModal("contrasena")}
-												className="pointer-events-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-sm font-bold text-[#7C3AED] outline-none transition hover:border-[#EDE9FE] hover:bg-[#F5F3FF] focus-visible:ring-2 focus-visible:ring-[#7C3AED]/30"
-												aria-label="Ayuda sobre tu contraseña"
-											>
-												?
-											</button>
-										</div>
-										{errorCuenta ? (
-											<p className="text-sm font-medium text-red-600" role="alert">
-												{errorCuenta}
-											</p>
-										) : null}
+								<h2 className="mt-4 text-xl font-semibold text-[#1E293B] sm:text-2xl">Tu identidad</h2>
+								<p className="mt-2 max-w-lg text-base leading-relaxed text-[#64748B] sm:text-lg">
+									Grado{" "}
+									<span className="font-semibold text-[#1E293B]">
+										{grado ? gradoEtiquetaParaVistaAlumno(grado) : "—"}
+									</span>
+									{" "}
+									· Grupo <span className="font-semibold text-[#1E293B]">{grupo || "—"}</span>
+									{" "}
+									— escribe tu nombre tal como lo registró el orientador.
+								</p>
+								<form onSubmit={enviarCuenta} className="mt-5 w-full space-y-4 text-left">
+									<div className="flex items-center gap-2.5">
+										<span className="shrink-0 text-[#64748B]" title="Nombre completo">
+											<IconoUsuario className="h-5 w-5" />
+										</span>
+										<label htmlFor="aida-nombre" className="sr-only">
+											Nombre completo
+										</label>
+										<input
+											id="aida-nombre"
+											type="text"
+											autoComplete="name"
+											className="min-w-0 flex-1 rounded-xl border border-[#E2E8F0] bg-white px-4 py-3.5 text-base text-[#1E293B] outline-none placeholder:text-[#94A3B8] focus:border-[#2563EB] focus:ring-2 focus:ring-[#DBEAFE] disabled:bg-[#F1F5F9] sm:text-lg"
+											placeholder="Nombre completo"
+											value={nombreCompleto}
+											onChange={(e) => setNombreCompleto(e.target.value)}
+											disabled={cargando || !claveYaValidada}
+										/>
 										<button
-											type="submit"
-											disabled={cargando || !claveYaValidada || !nombreCompleto.trim() || !password}
-											className="w-full rounded-xl bg-gradient-to-r from-[#2563EB] to-[#4F46E5] py-3 text-sm font-semibold text-white shadow-md shadow-[#2563EB]/20 transition hover:from-[#1D4ED8] hover:to-[#4338CA] disabled:opacity-50"
+											type="button"
+											onClick={() => setAyudaModal("nombre")}
+											className="pointer-events-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-base font-bold text-[#2563EB] outline-none transition hover:border-[#DBEAFE] hover:bg-[#EFF6FF] focus-visible:ring-2 focus-visible:ring-[#2563EB]/30"
+											aria-label="Ayuda: cómo escribir tu nombre completo"
 										>
-											{cargando ? "Entrando…" : "Entrar al panel"}
+											?
 										</button>
-									</form>
-								</div>
+									</div>
+									<div className="flex items-center gap-2.5">
+										<span className="shrink-0 text-[#64748B]" title="Contraseña">
+											<IconoCandado className="h-5 w-5" />
+										</span>
+										<label htmlFor="aida-pass" className="sr-only">
+											Contraseña
+										</label>
+										<input
+											id="aida-pass"
+											type="password"
+											autoComplete="new-password"
+											className="min-w-0 flex-1 rounded-xl border border-[#E2E8F0] bg-white px-4 py-3.5 text-base text-[#1E293B] outline-none placeholder:text-[#94A3B8] focus:border-[#2563EB] focus:ring-2 focus:ring-[#DBEAFE] disabled:bg-[#F1F5F9] sm:text-lg"
+											placeholder="Contraseña "
+											value={password}
+											onChange={(e) => setPassword(e.target.value)}
+											disabled={cargando || !claveYaValidada}
+										/>
+										<button
+											type="button"
+											onClick={() => setAyudaModal("contrasena")}
+											className="pointer-events-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-base font-bold text-[#7C3AED] outline-none transition hover:border-[#EDE9FE] hover:bg-[#F5F3FF] focus-visible:ring-2 focus-visible:ring-[#7C3AED]/30"
+											aria-label="Ayuda sobre tu contraseña"
+										>
+											?
+										</button>
+									</div>
+									{errorCuenta ? (
+										<p className="text-base font-medium text-red-600" role="alert">
+											{errorCuenta}
+										</p>
+									) : null}
+									<button
+										type="submit"
+										disabled={
+											cargando || !claveYaValidada || !nombreCompleto.trim() || !password
+										}
+										className="w-full rounded-xl bg-gradient-to-r from-[#2563EB] to-[#4F46E5] py-3.5 text-base font-semibold text-white shadow-md shadow-[#2563EB]/20 transition hover:from-[#1D4ED8] hover:to-[#4338CA] disabled:opacity-50 sm:py-4 sm:text-lg"
+									>
+										{cargando ? "Entrando…" : "Entrar al panel"}
+									</button>
+								</form>
 							</div>
 						</section>
 					</div>
@@ -331,12 +348,12 @@ export default function FlujoAlumno() {
 
 			{ayudaModal ? (
 				<div
-					className="fixed inset-0 z-[55] flex items-center justify-center bg-[#1E293B]/50 p-4 backdrop-blur-sm"
+					className="fixed inset-0 z-[55] flex items-center justify-center bg-[#1E293B]/50 p-4 backdrop-blur-sm sm:p-6"
 					role="presentation"
 					onClick={() => setAyudaModal(null)}
 				>
 					<div
-						className="w-full max-w-sm overflow-hidden rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] shadow-2xl"
+						className="w-full max-w-lg overflow-hidden rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] shadow-2xl sm:max-w-xl"
 						role="dialog"
 						aria-modal="true"
 						aria-labelledby="ayuda-titulo"
@@ -344,33 +361,36 @@ export default function FlujoAlumno() {
 						onClick={(e) => e.stopPropagation()}
 					>
 						<div
-							className={`px-5 py-4 text-white ${
+							className={`px-6 py-5 text-white sm:px-8 sm:py-6 ${
 								ayudaModal === "nombre"
 									? "bg-gradient-to-r from-[#2563EB] to-[#1D4ED8]"
 									: "bg-gradient-to-r from-[#7C3AED] to-[#6D28D9]"
 							}`}
 						>
-							<h2 id="ayuda-titulo" className="text-lg font-semibold">
+							<h2 id="ayuda-titulo" className="text-xl font-bold sm:text-2xl">
 								{ayudaModal === "nombre" ? "Nombre completo" : "Tu contraseña"}
 							</h2>
 						</div>
-						<div className="px-5 pb-5 pt-4">
-							<p id="ayuda-texto" className="text-sm leading-relaxed text-[#1E293B]">
-								
+						<div className="px-6 pb-6 pt-5 sm:px-8 sm:pb-8 sm:pt-6">
+							<p
+								id="ayuda-texto"
+								className="text-base font-bold leading-relaxed text-[#1E293B] sm:text-lg md:text-xl"
+							>
 								{ayudaModal === "nombre" ? (
 									<>
 										Digita tu nombre completo por ejemplo{" "}
-										<span className="font-semibold text-[#1E293B]">Juan Fernandez Ortiz</span>.
+										<span className="font-extrabold text-[#1E293B]">Juan Fernandez Ortiz</span>.
 									</>
 								) : (
 									<>
-										Crea una contraseña pero anótala bien ya que no la puedes recuperar si se te olvida. Deberas ir a la escuela con una USB y tus archivos previamente escaneados
+										Crea una contraseña pero anótala bien ya que no la puedes recuperar si se te olvida.
+										Deberás ir a la escuela con una USB y tus archivos previamente escaneados.
 									</>
 								)}
 							</p>
 							<button
 								type="button"
-								className="mt-6 w-full rounded-xl bg-[#2563EB] py-3 text-sm font-semibold text-white transition hover:bg-[#1D4ED8]"
+								className="mt-8 w-full rounded-xl bg-[#2563EB] py-3.5 text-base font-bold text-white transition hover:bg-[#1D4ED8] sm:mt-10 sm:py-4 sm:text-lg"
 								onClick={() => setAyudaModal(null)}
 							>
 								Entendido

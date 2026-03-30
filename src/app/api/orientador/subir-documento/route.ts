@@ -9,6 +9,7 @@ import {
 	nombreArchivoEstandar,
 	type TipoDocumentoClave,
 } from "@/lib/nombre-archivo";
+import { extraerCamposOcrServidor } from "@/lib/ocr/extract-servidor";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
 
@@ -98,6 +99,13 @@ export async function POST(request: Request) {
 		const bytes = new Uint8Array(await archivo.arrayBuffer());
 		const contentType = archivo.type || "application/octet-stream";
 
+		const ocrRes = await extraerCamposOcrServidor(Buffer.from(bytes), archivo.name, contentType, tipo);
+		const ahoraIso = new Date().toISOString();
+		const ocrCampos = ocrRes.ok ? ocrRes.fields : null;
+		const ocrTramite = ocrRes.tramite;
+		const ocrExtraidoEn = ocrRes.ok ? ahoraIso : null;
+		const ocrError = ocrRes.ok ? null : ocrRes.error.slice(0, 500);
+
 		await eliminarArchivosPreviosDelTipo(supabase, bucket, nombreCompleto, tipo);
 
 		const { error: errS } = await supabase.storage.from(bucket).upload(nombreTecnico, Buffer.from(bytes), {
@@ -115,6 +123,10 @@ export async function POST(request: Request) {
 			estado: ESTADOS_ENTREGA_DOCUMENTO.PENDIENTE_REVISION_MANUAL,
 			rutaStorage: nombreTecnico,
 			validacionAutomatica: false,
+			ocrCampos,
+			ocrTramite,
+			ocrExtraidoEn,
+			ocrError,
 		});
 		if (errDb) {
 			return NextResponse.json({ error: errDb.message }, { status: 500 });
@@ -124,6 +136,12 @@ export async function POST(request: Request) {
 			ok: true,
 			nombreTecnico,
 			estado: ESTADOS_ENTREGA_DOCUMENTO.PENDIENTE_REVISION_MANUAL,
+			ocr: {
+				exitoso: ocrRes.ok,
+				campos: ocrCampos,
+				tramite: ocrTramite,
+				error: ocrError,
+			},
 		});
 	} catch (e) {
 		console.error("orientador subir", e);

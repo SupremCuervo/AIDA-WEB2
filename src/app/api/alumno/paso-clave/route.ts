@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { COOKIE_CLAVE_OK, verificarTokenClaveOk } from "@/lib/alumno/jwt-cookies";
 import {
-	grupoTokenEstaVencido,
+	claveAccesoContextoVencido,
 	jsonClaveGrupoVencidaCierraCookie,
 } from "@/lib/alumno/requiere-grupo-vigente";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
@@ -21,18 +21,10 @@ export async function GET() {
 	try {
 		const p = await verificarTokenClaveOk(token);
 		const supabase = obtenerClienteSupabaseAdmin();
-		if (await grupoTokenEstaVencido(supabase, p.grupoTokenId)) {
+		if (await claveAccesoContextoVencido(supabase, p)) {
 			return jsonClaveGrupoVencidaCierraCookie();
 		}
-		const { data: filaGt } = await supabase
-			.from("grupo_tokens")
-			.select("grado")
-			.eq("id", p.grupoTokenId)
-			.maybeSingle();
-		if (
-			!filaGt ||
-			Number.parseInt(String(filaGt.grado ?? "").trim(), 10) !== 1
-		) {
+		if (Number.parseInt(String(p.grado ?? "").trim(), 10) !== 1) {
 			const res = NextResponse.json(
 				{
 					code: "ACCESO_SOLO_PRIMERO",
@@ -46,6 +38,7 @@ export async function GET() {
 		}
 		return NextResponse.json({
 			claveValidada: true,
+			modo: "grupo",
 			grupo: p.grupo,
 			grado: p.grado,
 			claveAcceso: p.claveAcceso ?? "",

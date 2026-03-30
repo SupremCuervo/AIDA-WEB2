@@ -3,6 +3,7 @@ import {
 	eliminarEntregaPorCuentaYTipo,
 	upsertEntregaAdjuntoOrientador,
 } from "@/lib/alumno/entregas-documento";
+import { parseCamposOcrDesdeJson } from "@/lib/ocr/campos-ocr-vista";
 import { ESTADOS_ENTREGA_DOCUMENTO } from "@/lib/alumno/estado-documento";
 import {
 	crearTipoAdjuntoOrientador,
@@ -18,6 +19,7 @@ export const runtime = "nodejs";
 
 const TAMANO_MAX_BYTES = 15 * 1024 * 1024;
 const ETIQUETA_MAX = 80;
+const OCR_JSON_MAX_CHARS = 120_000;
 
 function extensionDesdeNombre(nombreArchivo: string): string {
 	const i = nombreArchivo.lastIndexOf(".");
@@ -51,6 +53,8 @@ export async function POST(request: Request) {
 	const cuentaIdRaw = formData.get("cuentaId");
 	const etiquetaRaw = formData.get("etiqueta");
 	const archivo = formData.get("archivo");
+	const ocrCamposJsonRaw = formData.get("ocrCamposJson");
+	const ocrTramiteRaw = formData.get("ocrTramite");
 
 	const cuentaId = typeof cuentaIdRaw === "string" ? cuentaIdRaw.trim() : "";
 	if (!cuentaId) {
@@ -69,6 +73,29 @@ export async function POST(request: Request) {
 	}
 
 	const tipoNuevo = crearTipoAdjuntoOrientador();
+
+	let ocrCamposParsed: ReturnType<typeof parseCamposOcrDesdeJson> = null;
+	let ocrTramiteAdj: string | null = null;
+	if (typeof ocrTramiteRaw === "string" && ocrTramiteRaw.trim() !== "") {
+		ocrTramiteAdj = ocrTramiteRaw.trim().slice(0, 64);
+	}
+	let ocrErrorAdj: string | null = null;
+	if (typeof ocrCamposJsonRaw === "string" && ocrCamposJsonRaw.length > 0) {
+		if (ocrCamposJsonRaw.length > OCR_JSON_MAX_CHARS) {
+			return NextResponse.json({ error: "ocrCamposJson demasiado grande" }, { status: 400 });
+		}
+		try {
+			const parsed = JSON.parse(ocrCamposJsonRaw) as unknown;
+			ocrCamposParsed = parseCamposOcrDesdeJson(parsed);
+		} catch {
+			return NextResponse.json({ error: "ocrCamposJson no es JSON válido" }, { status: 400 });
+		}
+		if (!ocrCamposParsed) {
+			ocrErrorAdj = "ocr_sin_campos_validos";
+		}
+	}
+	const ahoraOcr = new Date().toISOString();
+	const ocrExtraidoAdj = ocrCamposParsed ? ahoraOcr : null;
 
 	try {
 		const supabase = obtenerClienteSupabaseAdmin();
@@ -125,6 +152,10 @@ export async function POST(request: Request) {
 			rutaStorage: nombreTecnico,
 			validacionAutomatica: false,
 			etiquetaPersonalizada: etiqueta,
+			ocrCampos: ocrCamposParsed,
+			ocrTramite: ocrTramiteAdj,
+			ocrExtraidoEn: ocrExtraidoAdj,
+			ocrError: ocrErrorAdj,
 		});
 		if (errDb) {
 			await supabase.storage.from(bucket).remove([nombreTecnico]);
@@ -178,7 +209,7 @@ export async function DELETE(request: Request) {
 		}
 		await registrarLogApi({
 			orientador,
-			accion: "ELIMINAR_ADJUNTO_ORIENTADOR",
+			accion: `Documento de orientador eliminado (${tipoDocumento})`,
 			entidad: "entregas_documento_alumno",
 			entidadId: cuentaId,
 			detalle: { cuenta_id: cuentaId, tipo_documento: tipoDocumento },

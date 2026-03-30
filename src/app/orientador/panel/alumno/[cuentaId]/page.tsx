@@ -2,9 +2,14 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
+import { DURACION_MENSAJE_EMERGENTE_MS } from "@/lib/ui/duracion-mensaje-emergente-ms";
 import type { EstadoEntregaDocumentoUi } from "@/lib/alumno/estado-documento";
 import { GRADO_ESCOLAR_MAX } from "@/lib/padron/grado-alumno";
+import {
+	entradasFieldsOrdenadas,
+	type CampoOcrCelda,
+} from "@/lib/ocr/campos-ocr-vista";
 import type { TipoDocumentoClave } from "@/lib/nombre-archivo";
 
 const TIPOS_DESCARGA_EXP: { tipo: TipoDocumentoClave; etiqueta: string }[] = [
@@ -22,6 +27,10 @@ type DocFila = {
 	motivoRechazo: string | null;
 	puedeDescargar: boolean;
 	validacionAutomatica: boolean;
+	ocrCampos: Record<string, CampoOcrCelda> | null;
+	ocrTramite: string | null;
+	ocrExtraidoEn: string | null;
+	ocrError: string | null;
 };
 
 type CarreraCat = { id: string; codigo: string; nombre: string };
@@ -75,6 +84,7 @@ export default function OrientadorExpedientePage() {
 	const [matriculaExpediente, setMatriculaExpediente] = useState("");
 	const [carreraGuardando, setCarreraGuardando] = useState(false);
 	const [tipoDescargaRapida, setTipoDescargaRapida] = useState<TipoDocumentoClave>("acta_nacimiento");
+	const [ocrExpandido, setOcrExpandido] = useState<TipoDocumentoClave | null>(null);
 
 	const cargar = useCallback(async () => {
 		if (!cuentaId) {
@@ -129,6 +139,22 @@ export default function OrientadorExpedientePage() {
 	useEffect(() => {
 		void cargar();
 	}, [cargar]);
+
+	useEffect(() => {
+		if (!mensaje) {
+			return;
+		}
+		const id = window.setTimeout(() => setMensaje(null), DURACION_MENSAJE_EMERGENTE_MS);
+		return () => window.clearTimeout(id);
+	}, [mensaje]);
+
+	useEffect(() => {
+		if (!error.trim()) {
+			return;
+		}
+		const id = window.setTimeout(() => setError(""), DURACION_MENSAJE_EMERGENTE_MS);
+		return () => window.clearTimeout(id);
+	}, [error]);
 
 	async function patchEntrega(tipo: TipoDocumentoClave, accion: "rechazar" | "validar_manual") {
 		setMensaje(null);
@@ -407,22 +433,49 @@ export default function OrientadorExpedientePage() {
 								<tr>
 									<th className="px-3 py-3 font-semibold text-slate-600">Documento</th>
 									<th className="px-3 py-3 font-semibold text-slate-600">Estatus</th>
+									<th className="px-3 py-3 font-semibold text-slate-600">OCR</th>
 									<th className="px-3 py-3 font-semibold text-slate-600">Acciones</th>
 								</tr>
 							</thead>
 							<tbody className="divide-y divide-slate-100">
-								{documentos.map((d) => (
-									<tr key={d.tipo}>
-										<td className="px-3 py-3 font-medium text-slate-900">{d.etiqueta}</td>
-										<td className="px-3 py-3 text-slate-700">
-											<span className="inline-flex items-center gap-1">
-												{d.estado === "validado" && d.validacionAutomatica ? (
-													<span className="text-emerald-600">✓</span>
-												) : null}
-												{textoEstado(d.estado, d.motivoRechazo)}
-											</span>
-										</td>
-										<td className="px-3 py-3">
+								{documentos.map((d) => {
+									const nOcr = d.ocrCampos != null ? Object.keys(d.ocrCampos).length : 0;
+									const hayOcr = nOcr > 0 || Boolean(d.ocrError?.trim());
+									const filasOcr =
+										d.ocrCampos != null && nOcr > 0 ? entradasFieldsOrdenadas(d.ocrCampos) : [];
+									return (
+										<Fragment key={d.tipo}>
+											<tr>
+												<td className="px-3 py-3 font-medium text-slate-900">{d.etiqueta}</td>
+												<td className="px-3 py-3 text-slate-700">
+													<span className="inline-flex items-center gap-1">
+														{d.estado === "validado" && d.validacionAutomatica ? (
+															<span className="text-emerald-600">✓</span>
+														) : null}
+														{textoEstado(d.estado, d.motivoRechazo)}
+													</span>
+												</td>
+												<td className="max-w-[180px] px-3 py-3 text-xs text-slate-600">
+													{!d.puedeDescargar ? (
+														<span className="text-slate-400">—</span>
+													) : hayOcr ? (
+														<button
+															type="button"
+															className="font-medium text-violet-700 underline decoration-violet-300 hover:decoration-violet-600"
+															onClick={() =>
+																setOcrExpandido((prev) => (prev === d.tipo ? null : d.tipo))
+															}
+														>
+															{nOcr > 0
+																? `${nOcr} campo${nOcr === 1 ? "" : "s"}`
+																: "Sin datos"}
+															{d.ocrError ? " · aviso" : ""}
+														</button>
+													) : (
+														<span className="text-slate-400">Sin datos</span>
+													)}
+												</td>
+												<td className="px-3 py-3">
 											<div className="flex flex-wrap gap-2">
 												<label className="cursor-pointer">
 													<input
@@ -470,7 +523,50 @@ export default function OrientadorExpedientePage() {
 											</div>
 										</td>
 									</tr>
-								))}
+											{ocrExpandido === d.tipo && d.puedeDescargar && hayOcr ? (
+												<tr className="bg-slate-50 text-xs text-slate-700">
+													<td colSpan={4} className="px-3 pb-3 pt-0">
+														<div className="rounded-lg border border-slate-200 bg-white p-3">
+															{d.ocrTramite ? (
+																<p className="mb-2 text-[11px] text-slate-500">
+																	Trámite:{" "}
+																	<span className="font-mono text-slate-800">{d.ocrTramite}</span>
+																	{d.ocrExtraidoEn ? (
+																		<>
+																			{" "}
+																			· {new Date(d.ocrExtraidoEn).toLocaleString("es-MX")}
+																		</>
+																	) : null}
+																</p>
+															) : null}
+															{d.ocrError ? (
+																<p className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-amber-900">
+																	{d.ocrError}
+																</p>
+															) : null}
+															{filasOcr.length > 0 ? (
+																<ul className="max-h-40 space-y-1 overflow-y-auto">
+																	{filasOcr.map((row) => (
+																		<li
+																			key={row.clave}
+																			className="flex flex-wrap gap-x-2 border-b border-slate-100 py-1 last:border-0"
+																		>
+																			<span className="font-medium">{row.etiqueta}</span>
+																			<span className="break-all">{row.valor}</span>
+																			{row.conf ? (
+																				<span className="text-[10px] text-slate-400">({row.conf})</span>
+																			) : null}
+																		</li>
+																	))}
+																</ul>
+															) : null}
+														</div>
+													</td>
+												</tr>
+											) : null}
+										</Fragment>
+									);
+								})}
 							</tbody>
 						</table>
 					</div>

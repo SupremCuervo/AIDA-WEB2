@@ -139,6 +139,10 @@ create table if not exists public.entregas_documento_alumno (
 	subido_en timestamptz not null default now(),
 	actualizado_en timestamptz not null default now(),
 	etiqueta_personalizada text,
+	ocr_campos jsonb,
+	ocr_tramite text,
+	ocr_extraido_en timestamptz,
+	ocr_error text,
 	unique (cuenta_id, tipo_documento)
 );
 
@@ -149,6 +153,14 @@ alter table public.entregas_documento_alumno enable row level security;
 comment on table public.entregas_documento_alumno is 'Estado por documento; tipos en TIPOS_DOCUMENTO en código.';
 comment on column public.entregas_documento_alumno.etiqueta_personalizada is
 	'Nombre legible para adjuntos orientador_adjunto_* (citatorios, etc.).';
+comment on column public.entregas_documento_alumno.ocr_campos is
+	'JSON: clave → { value, confidence? } devuelto por el servicio OCR.';
+comment on column public.entregas_documento_alumno.ocr_tramite is
+	'Trámite OCR (curp, ine, acta_nacimiento, comprobante, certificado_medico).';
+comment on column public.entregas_documento_alumno.ocr_extraido_en is
+	'Última extracción OCR guardada.';
+comment on column public.entregas_documento_alumno.ocr_error is
+	'Error corto si falló la extracción.';
 
 -- -----------------------------------------------------------------------------
 -- Orientadores (panel)
@@ -245,6 +257,17 @@ begin
 end;
 $$;
 
+create or replace function public.logs_ref_expediente_padron(p_id uuid, p_matricula text)
+returns text
+language sql
+immutable
+as $$
+	select case
+		when p_matricula is not null and btrim(p_matricula) <> '' then btrim(p_matricula)
+		else right(replace(p_id::text, '-', ''), 4)
+	end;
+$$;
+
 create or replace function public.aud_archivar_padrones(
 	p_padron_ids uuid[],
 	p_grupo_token_id uuid,
@@ -260,6 +283,7 @@ declare
 	v_count int := 0;
 	v_ids uuid[];
 begin
+	perform set_config('aida.omitir_log_trigger_padron', '1', true);
 	if p_padron_ids is not null and cardinality(p_padron_ids) > 0 then
 		with u as (
 			update public.padron_alumnos p
@@ -280,12 +304,17 @@ begin
 		)
 		select count(*)::int, coalesce(array_agg(u.id), '{}') into v_count, v_ids from u;
 	end if;
+	perform set_config('aida.omitir_log_trigger_padron', '', true);
 
 	perform public.registrar_log(
 		coalesce(nullif(trim(p_actor_tipo), ''), 'sistema'),
 		p_actor_id,
 		coalesce(nullif(trim(p_actor_etiqueta), ''), 'sistema'),
-		'ARCHIVAR_EXPEDIENTE',
+		case
+			when v_count <= 0 then 'Archivo muerto: sin cambios'
+			when v_count = 1 then 'Un expediente pasado a archivo muerto'
+			else 'Archivo muerto: ' || v_count::text || ' expedientes actualizados'
+		end,
 		'padron_alumnos',
 		null,
 		jsonb_build_object(
@@ -312,29 +341,33 @@ set search_path = public
 as $$
 declare
 	v_nombre text;
-	v_ok boolean := false;
+	v_mat text;
+	v_ref text;
 begin
+	perform set_config('aida.omitir_log_trigger_padron', '1', true);
 	update public.padron_alumnos p
 	set archivo_muerto_en = null
 	where p.id = p_padron_id and p.archivo_muerto_en is not null
-	returning p.nombre_completo into v_nombre;
+	returning p.nombre_completo, p.matricula into v_nombre, v_mat;
 
-	if found then
-		v_ok := true;
-		perform public.registrar_log(
-			coalesce(nullif(trim(p_actor_tipo), ''), 'sistema'),
-			p_actor_id,
-			coalesce(nullif(trim(p_actor_etiqueta), ''), 'sistema'),
-			'REACTIVAR_EXPEDIENTE',
-			'padron_alumnos',
-			p_padron_id::text,
-			jsonb_build_object('nombre_completo', v_nombre),
-			'api'
-		);
-		return jsonb_build_object('ok', true, 'padronId', p_padron_id);
+	if not found then
+		perform set_config('aida.omitir_log_trigger_padron', '', true);
+		return jsonb_build_object('ok', false, 'error', 'no_encontrado_o_ya_activo');
 	end if;
 
-	return jsonb_build_object('ok', false, 'error', 'no_encontrado_o_ya_activo');
+	perform set_config('aida.omitir_log_trigger_padron', '', true);
+	v_ref := public.logs_ref_expediente_padron(p_padron_id, v_mat);
+	perform public.registrar_log(
+		coalesce(nullif(trim(p_actor_tipo), ''), 'sistema'),
+		p_actor_id,
+		coalesce(nullif(trim(p_actor_etiqueta), ''), 'sistema'),
+		'Reactivación de expediente ' || v_ref,
+		'padron_alumnos',
+		p_padron_id::text,
+		jsonb_build_object('nombre_completo', v_nombre),
+		'api'
+	);
+	return jsonb_build_object('ok', true, 'padronId', p_padron_id);
 end;
 $$;
 
@@ -347,6 +380,11 @@ as $$
 declare
 	v_id text;
 	v_detalle jsonb;
+	v_accion text;
+	v_ref text;
+	v_parts text[];
+	v_mat text;
+	v_pid uuid;
 begin
 	v_id := coalesce(new.id::text, old.id::text);
 	v_detalle := jsonb_build_object(
@@ -355,13 +393,162 @@ begin
 		'despues', case when tg_op in ('INSERT', 'UPDATE') then (row_to_json(new))::jsonb else null end
 	);
 
+	v_accion := null;
+
+	if tg_table_name = 'padron_alumnos' then
+		if tg_op = 'INSERT' then
+			v_ref := public.logs_ref_expediente_padron(new.id, new.matricula);
+			v_accion := 'Expediente ' || v_ref || ' creado';
+		elsif tg_op = 'UPDATE' then
+			if coalesce(current_setting('aida.omitir_log_trigger_padron', true), '') = '1' then
+				return new;
+			end if;
+			if old.archivo_muerto_en is distinct from new.archivo_muerto_en
+				and row(
+					old.nombre_completo,
+					old.grupo_token_id,
+					old.institucion_grupo_id,
+					old.grado_alumno,
+					old.carrera_id,
+					old.matricula
+				) is not distinct from row(
+					new.nombre_completo,
+					new.grupo_token_id,
+					new.institucion_grupo_id,
+					new.grado_alumno,
+					new.carrera_id,
+					new.matricula
+				) then
+				return new;
+			end if;
+			v_ref := public.logs_ref_expediente_padron(new.id, new.matricula);
+			v_parts := array[]::text[];
+			if old.nombre_completo is distinct from new.nombre_completo then
+				v_parts := array_append(v_parts, 'nombre');
+			end if;
+			if old.grupo_token_id is distinct from new.grupo_token_id
+				or old.institucion_grupo_id is distinct from new.institucion_grupo_id then
+				v_parts := array_append(v_parts, 'grupo o sección');
+			end if;
+			if old.grado_alumno is distinct from new.grado_alumno then
+				v_parts := array_append(v_parts, 'grado');
+			end if;
+			if old.carrera_id is distinct from new.carrera_id then
+				v_parts := array_append(v_parts, 'carrera');
+			end if;
+			if old.matricula is distinct from new.matricula then
+				v_parts := array_append(v_parts, 'matrícula');
+			end if;
+			if old.archivo_muerto_en is distinct from new.archivo_muerto_en then
+				if new.archivo_muerto_en is null then
+					v_parts := array_append(v_parts, 'reactivación');
+				else
+					v_parts := array_append(v_parts, 'archivo muerto');
+				end if;
+			end if;
+			if cardinality(v_parts) > 0 then
+				v_accion := 'Actualización de ' || array_to_string(v_parts, ', ') || ' al expediente ' || v_ref;
+			else
+				v_accion := 'Actualización de expediente ' || v_ref;
+			end if;
+		end if;
+
+	elsif tg_table_name = 'grupo_tokens' then
+		if tg_op = 'INSERT' then
+			v_accion := 'Token de acceso creado para ' || trim(coalesce(new.grado, '')) || '°' ||
+				upper(trim(coalesce(new.grupo, '')));
+		elsif tg_op = 'UPDATE' then
+			v_accion := 'Token de acceso actualizado (' || trim(coalesce(new.grado, '')) || '°' ||
+				upper(trim(coalesce(new.grupo, ''))) || ')';
+		end if;
+
+	elsif tg_table_name = 'entregas_documento_alumno' then
+		select p.id, p.matricula into v_pid, v_mat
+		from cuentas_alumno c
+		join padron_alumnos p on p.id = c.padron_id
+		where c.id = coalesce(new.cuenta_id, old.cuenta_id)
+		limit 1;
+		v_ref := public.logs_ref_expediente_padron(v_pid, v_mat);
+		if tg_op = 'INSERT' then
+			v_accion := 'Nuevo documento subido al expediente ' || v_ref;
+		elsif tg_op = 'UPDATE' then
+			if old.estado is distinct from new.estado then
+				v_accion := 'Estado de documento actualizado en expediente ' || v_ref || ' (' ||
+					coalesce(new.tipo_documento, '') || ')';
+			else
+				v_accion := 'Documento actualizado en expediente ' || v_ref;
+			end if;
+		end if;
+
+	elsif tg_table_name = 'orientador_plantillas' then
+		if tg_op = 'INSERT' then
+			v_accion := 'Nueva plantilla subida';
+		elsif tg_op = 'UPDATE' then
+			v_accion := 'Plantilla actualizada';
+		end if;
+
+	elsif tg_table_name = 'cuentas_alumno' then
+		if tg_op = 'INSERT' then
+			select p.id, p.matricula into v_pid, v_mat
+			from padron_alumnos p
+			where p.id = new.padron_id
+			limit 1;
+			v_ref := public.logs_ref_expediente_padron(v_pid, v_mat);
+			v_accion := 'Cuenta de acceso creada para expediente ' || v_ref;
+		elsif tg_op = 'UPDATE' then
+			v_accion := 'Cuenta de alumno actualizada';
+		end if;
+
+	elsif tg_table_name = 'carreras' then
+		if tg_op = 'INSERT' then
+			v_accion := 'Nueva carrera en el catálogo: ' || coalesce(new.nombre, new.codigo);
+		elsif tg_op = 'UPDATE' then
+			v_accion := 'Carrera actualizada en el catálogo: ' || coalesce(new.nombre, new.codigo);
+		elsif tg_op = 'DELETE' then
+			v_accion := 'Carrera eliminada del catálogo: ' || coalesce(old.nombre, old.codigo);
+		end if;
+
+	elsif tg_table_name = 'institucion_grupos' then
+		if tg_op = 'INSERT' then
+			v_accion := 'Nueva sección en catálogo (' || coalesce(new.grado::text, '') || '° ' ||
+				upper(trim(coalesce(new.grupo, ''))) || ')';
+		elsif tg_op = 'UPDATE' then
+			v_accion := 'Sección del catálogo actualizada';
+		elsif tg_op = 'DELETE' then
+			v_accion := 'Sección eliminada del catálogo';
+		end if;
+
+	elsif tg_table_name = 'orientador_semestre_fechas' then
+		if tg_op = 'UPDATE' then
+			if old.primer_periodo_fecha is distinct from new.primer_periodo_fecha
+				or old.segundo_periodo_fecha is distinct from new.segundo_periodo_fecha
+				or old.nombre_anios is distinct from new.nombre_anios then
+				v_accion := 'Periodos actualizados';
+			else
+				v_accion := 'Calendario escolar actualizado';
+			end if;
+		end if;
+
+	elsif tg_table_name = 'cargas_alumnos' then
+		if tg_op = 'INSERT' then
+			v_accion := 'Creación de carga de alumnos';
+		elsif tg_op = 'DELETE' then
+			v_accion := 'Carga de alumnos eliminada';
+		end if;
+	end if;
+
+	if v_accion is null then
+		v_accion := initcap(replace(lower(tg_op), '_', ' ')) || ' en ' ||
+			replace(tg_table_name::text, '_', ' ');
+	end if;
+
 	insert into public.logs (actor_tipo, actor_id, actor_etiqueta, accion, entidad, entidad_id, detalle, origen)
 	values (
 		'sistema',
 		null,
-		'sistema',
-		tg_op || '_' || tg_table_name,
-		tg_table_name,
+		'Sistema',
+		v_accion,
+		tg_table_name::text,
 		v_id,
 		v_detalle,
 		'trigger'
@@ -376,22 +563,22 @@ $$;
 
 drop trigger if exists trg_logs_padron_alumnos on public.padron_alumnos;
 create trigger trg_logs_padron_alumnos
-after insert or update or delete on public.padron_alumnos
+after insert or update on public.padron_alumnos
 for each row execute procedure public.logs_trigger_auditoria_fila();
 
 drop trigger if exists trg_logs_grupo_tokens on public.grupo_tokens;
 create trigger trg_logs_grupo_tokens
-after insert or update or delete on public.grupo_tokens
+after insert or update on public.grupo_tokens
 for each row execute procedure public.logs_trigger_auditoria_fila();
 
 drop trigger if exists trg_logs_entregas_documento on public.entregas_documento_alumno;
 create trigger trg_logs_entregas_documento
-after insert or update or delete on public.entregas_documento_alumno
+after insert or update on public.entregas_documento_alumno
 for each row execute procedure public.logs_trigger_auditoria_fila();
 
 drop trigger if exists trg_logs_orientador_plantillas on public.orientador_plantillas;
 create trigger trg_logs_orientador_plantillas
-after insert or update or delete on public.orientador_plantillas
+after insert or update on public.orientador_plantillas
 for each row execute procedure public.logs_trigger_auditoria_fila();
 
 drop trigger if exists trg_logs_cuentas_alumno on public.cuentas_alumno;
@@ -399,13 +586,26 @@ create trigger trg_logs_cuentas_alumno
 after insert or update or delete on public.cuentas_alumno
 for each row execute procedure public.logs_trigger_auditoria_fila();
 
+drop trigger if exists trg_logs_carreras on public.carreras;
+create trigger trg_logs_carreras
+after insert or update or delete on public.carreras
+for each row execute procedure public.logs_trigger_auditoria_fila();
+
+drop trigger if exists trg_logs_institucion_grupos on public.institucion_grupos;
+create trigger trg_logs_institucion_grupos
+after insert or update or delete on public.institucion_grupos
+for each row execute procedure public.logs_trigger_auditoria_fila();
+
 revoke all on function public.registrar_log(text, uuid, text, text, text, text, jsonb, text) from public;
 revoke all on function public.aud_archivar_padrones(uuid[], uuid, text, uuid, text) from public;
 revoke all on function public.aud_reactivar_padron(uuid, text, uuid, text) from public;
+revoke all on function public.logs_ref_expediente_padron(uuid, text) from public;
+revoke all on function public.logs_trigger_auditoria_fila() from public;
 
 grant execute on function public.registrar_log(text, uuid, text, text, text, text, jsonb, text) to service_role;
 grant execute on function public.aud_archivar_padrones(uuid[], uuid, text, uuid, text) to service_role;
 grant execute on function public.aud_reactivar_padron(uuid, text, uuid, text) to service_role;
+grant execute on function public.logs_ref_expediente_padron(uuid, text) to service_role;
 
 -- -----------------------------------------------------------------------------
 -- Periodos / semestre (ciclo AAAA-AAAA)
@@ -415,7 +615,9 @@ create table if not exists public.orientador_semestre_fechas (
 	primer_periodo_fecha date,
 	segundo_periodo_fecha date,
 	nombre_anios text,
-	actualizado_en timestamptz not null default now()
+	actualizado_en timestamptz not null default now(),
+	promocion_primer_ejecutada_en timestamptz,
+	promocion_segundo_ejecutada_en timestamptz
 );
 
 comment on table public.orientador_semestre_fechas is
@@ -423,7 +625,27 @@ comment on table public.orientador_semestre_fechas is
 
 comment on column public.orientador_semestre_fechas.nombre_anios is 'Nombre tipo AAAA-AAAA según las fechas guardadas.';
 
+comment on column public.orientador_semestre_fechas.promocion_primer_ejecutada_en is
+	'Promoción automática ya aplicada para primer_periodo_fecha (cron /api/cron/promocion-semestre).';
+
+comment on column public.orientador_semestre_fechas.promocion_segundo_ejecutada_en is
+	'Promoción automática ya aplicada para segundo_periodo_fecha (cron /api/cron/promocion-semestre).';
+
 alter table public.orientador_semestre_fechas enable row level security;
+
+drop trigger if exists trg_logs_orientador_semestre on public.orientador_semestre_fechas;
+create trigger trg_logs_orientador_semestre
+after insert or update on public.orientador_semestre_fechas
+for each row execute procedure public.logs_trigger_auditoria_fila();
+
+do $$
+begin
+	if to_regclass('public.cargas_alumnos') is not null then
+		execute 'drop trigger if exists trg_logs_cargas_alumnos on public.cargas_alumnos';
+		execute 'create trigger trg_logs_cargas_alumnos after insert or delete on public.cargas_alumnos for each row execute procedure public.logs_trigger_auditoria_fila()';
+	end if;
+end;
+$$;
 
 -- Legado (ventanas por fecha); la app ya no crea periodos aquí.
 create table if not exists public.periodos_academicos (
@@ -465,6 +687,9 @@ cross join (
 ) as l(x)
 on conflict (grado, grupo) do nothing;
 
+-- -----------------------------------------------------------------------------
+-- Cargas de alumnos (varios grupos, un token): ejecutar también, si aplica,
+-- supabase/cargas_alumnos_extension.sql y el seed opcional aida_seed_orientador_y_carga_demo.sql
 -- -----------------------------------------------------------------------------
 -- Primer orientador (descomenta, pon email y hash bcrypt real)
 -- -----------------------------------------------------------------------------

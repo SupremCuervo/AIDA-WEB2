@@ -284,6 +284,86 @@ export async function PUT(request: Request) {
 	}
 }
 
+/**
+ * Actualización parcial: clave y/o fecha de cierre sin mover la sección (cualquier grado).
+ */
+export async function PATCH(request: Request) {
+	const orientador = await obtenerPayloadOrientador();
+	if (!orientador) {
+		return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+	}
+	try {
+		const body = (await request.json()) as {
+			id?: string;
+			claveAcceso?: string;
+			fechaLimiteEntrega?: string | null;
+		};
+		const id = limpiar(body.id);
+		if (!id) {
+			return NextResponse.json({ error: "id obligatorio" }, { status: 400 });
+		}
+		const enviaClave = typeof body.claveAcceso === "string";
+		const enviaFecha = body.fechaLimiteEntrega !== undefined;
+		if (!enviaClave && !enviaFecha) {
+			return NextResponse.json(
+				{ error: "Indica claveAcceso y/o fechaLimiteEntrega" },
+				{ status: 400 },
+			);
+		}
+
+		const supabase = obtenerClienteSupabaseAdmin();
+		const { data: existe, error: errQ } = await supabase
+			.from("grupo_tokens")
+			.select("id")
+			.eq("id", id)
+			.maybeSingle();
+		if (errQ || !existe) {
+			return NextResponse.json({ error: "Token no encontrado" }, { status: 404 });
+		}
+
+		const patch: { clave_acceso?: string; fecha_limite_entrega?: string | null } = {};
+		if (enviaClave) {
+			const c = limpiar(body.claveAcceso).toUpperCase();
+			if (!c) {
+				return NextResponse.json({ error: "La clave no puede quedar vacía" }, { status: 400 });
+			}
+			patch.clave_acceso = c;
+		}
+		if (enviaFecha) {
+			let fecha: string | null = null;
+			if (body.fechaLimiteEntrega === null || body.fechaLimiteEntrega === "") {
+				fecha = null;
+			} else if (typeof body.fechaLimiteEntrega === "string") {
+				const s = body.fechaLimiteEntrega.trim();
+				if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+					return NextResponse.json(
+						{ error: "fechaLimiteEntrega debe ser YYYY-MM-DD o vacía" },
+						{ status: 400 },
+					);
+				}
+				fecha = s;
+			} else {
+				return NextResponse.json({ error: "fechaLimiteEntrega no válida" }, { status: 400 });
+			}
+			patch.fecha_limite_entrega = fecha;
+		}
+
+		const { error } = await supabase.from("grupo_tokens").update(patch).eq("id", id);
+		if (error) {
+			console.error("patch grupo token", error);
+			const msg = (error.message || "").toLowerCase();
+			if (msg.includes("duplicate") || msg.includes("unique")) {
+				return NextResponse.json({ error: "Esa clave ya está en uso" }, { status: 409 });
+			}
+			return NextResponse.json({ error: "No se pudo actualizar el token" }, { status: 500 });
+		}
+		return NextResponse.json({ ok: true });
+	} catch (e) {
+		console.error("patch grupo token", e);
+		return NextResponse.json({ error: "Error del servidor" }, { status: 500 });
+	}
+}
+
 export async function DELETE(request: Request) {
 	const orientador = await obtenerPayloadOrientador();
 	if (!orientador) {
@@ -337,7 +417,7 @@ export async function DELETE(request: Request) {
 		}
 		await registrarLogApi({
 			orientador,
-			accion: "ELIMINAR_GRUPO_TOKEN",
+			accion: `Eliminación de token de acceso (${String(fila.grado ?? "").trim()}°${String(fila.grupo ?? "").trim().toUpperCase()})`,
 			entidad: "grupo_tokens",
 			entidadId: id,
 			detalle: {

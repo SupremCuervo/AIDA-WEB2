@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { esGrupoAccesoCerradoPorFecha } from "@/lib/grupo-tokens/fecha-limite-acceso";
-import { COOKIE_ALUMNO, COOKIE_CLAVE_OK } from "@/lib/alumno/jwt-cookies";
+import { COOKIE_ALUMNO, COOKIE_CLAVE_OK, type PayloadClaveOk } from "@/lib/alumno/jwt-cookies";
 
 const CUERPO_VENCIDO = {
 	code: "GRUPO_VENCIDO" as const,
@@ -40,6 +40,13 @@ export async function grupoTokenEstaVencido(
 		return true;
 	}
 	return esGrupoAccesoCerradoPorFecha(gt.fecha_limite_entrega);
+}
+
+export async function claveAccesoContextoVencido(
+	supabase: SupabaseClient,
+	p: PayloadClaveOk,
+): Promise<boolean> {
+	return grupoTokenEstaVencido(supabase, p.grupoTokenId);
 }
 
 export async function padronPerteneceAGrupoVencido(

@@ -4,7 +4,7 @@ import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
 
 export const runtime = "nodejs";
 
-const LIMITE = 200;
+const LIMITE = 500;
 
 export async function GET() {
 	const orientador = await obtenerPayloadOrientador();

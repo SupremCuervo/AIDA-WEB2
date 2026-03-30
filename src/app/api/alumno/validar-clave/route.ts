@@ -24,57 +24,59 @@ export async function POST(request: Request) {
 		const { data, error } = await supabase
 			.from("grupo_tokens")
 			.select("id, grupo, grado, fecha_limite_entrega")
-			.eq("clave_acceso", clave)
+			.ilike("clave_acceso", clave)
 			.maybeSingle();
 
 		if (error) {
-			console.error("validar-clave supabase", error);
+			console.error("validar-clave supabase grupo_tokens", error);
 			return NextResponse.json({ error: "Error al validar la clave" }, { status: 500 });
 		}
 
-		if (!data) {
-			return NextResponse.json(
-				{ code: "CLAVE_INVALIDA", error: "Clave no válida o inexistente" },
-				{ status: 401 },
-			);
+		if (data) {
+			if (esGrupoAccesoCerradoPorFecha(data.fecha_limite_entrega)) {
+				return NextResponse.json(
+					{
+						code: "GRUPO_VENCIDO",
+						error:
+							"Esta clave ya no permite acceso: finalizó la fecha límite configurada para el grupo.",
+					},
+					{ status: 403 },
+				);
+			}
+
+			if (Number.parseInt(String(data.grado ?? "").trim(), 10) !== 1) {
+				return NextResponse.json(
+					{
+						code: "CLAVE_NO_PRIMERO",
+						error:
+							"El acceso con clave solo aplica a 1.° grado. Desde 2.° el alumno no usa token de grupo.",
+					},
+					{ status: 403 },
+				);
+			}
+
+			const jwt = await firmarTokenClaveOk({
+				modo: "grupo",
+				grupoTokenId: data.id,
+				grupo: data.grupo,
+				grado: data.grado,
+				claveAcceso: clave,
+			});
+
+			const res = NextResponse.json({
+				ok: true,
+				modo: "grupo",
+				grupo: data.grupo,
+				grado: data.grado,
+			});
+			res.cookies.set(COOKIE_CLAVE_OK, jwt, opcionesCookieHttp(30 * 60));
+			return res;
 		}
 
-		if (esGrupoAccesoCerradoPorFecha(data.fecha_limite_entrega)) {
-			return NextResponse.json(
-				{
-					code: "GRUPO_VENCIDO",
-					error:
-						"Esta clave ya no permite acceso: finalizó la fecha límite configurada para el grupo.",
-				},
-				{ status: 403 },
-			);
-		}
-
-		if (Number.parseInt(String(data.grado ?? "").trim(), 10) !== 1) {
-			return NextResponse.json(
-				{
-					code: "CLAVE_NO_PRIMERO",
-					error:
-						"El acceso con clave solo aplica a 1.° grado. Desde 2.° el alumno no usa token de grupo.",
-				},
-				{ status: 403 },
-			);
-		}
-
-		const jwt = await firmarTokenClaveOk({
-			grupoTokenId: data.id,
-			grupo: data.grupo,
-			grado: data.grado,
-			claveAcceso: clave,
-		});
-
-		const res = NextResponse.json({
-			ok: true,
-			grupo: data.grupo,
-			grado: data.grado,
-		});
-		res.cookies.set(COOKIE_CLAVE_OK, jwt, opcionesCookieHttp(30 * 60));
-		return res;
+		return NextResponse.json(
+			{ code: "CLAVE_INVALIDA", error: "Clave no válida o inexistente" },
+			{ status: 401 },
+		);
 	} catch (e) {
 		console.error(e);
 		return NextResponse.json(

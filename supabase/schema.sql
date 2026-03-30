@@ -112,8 +112,16 @@ create table if not exists public.entregas_documento_alumno (
 );
 
 alter table public.entregas_documento_alumno add column if not exists etiqueta_personalizada text;
+alter table public.entregas_documento_alumno add column if not exists ocr_campos jsonb;
+alter table public.entregas_documento_alumno add column if not exists ocr_tramite text;
+alter table public.entregas_documento_alumno add column if not exists ocr_extraido_en timestamptz;
+alter table public.entregas_documento_alumno add column if not exists ocr_error text;
 
 comment on column public.entregas_documento_alumno.etiqueta_personalizada is 'Nombre legible para adjuntos orientador_adjunto_* (citatorios, etc.). NULL en los 5 documentos del trámite.';
+comment on column public.entregas_documento_alumno.ocr_campos is 'JSON devuelto por OCR extract.';
+comment on column public.entregas_documento_alumno.ocr_tramite is 'Trámite usado en extract.';
+comment on column public.entregas_documento_alumno.ocr_extraido_en is 'Marca de tiempo extracción.';
+comment on column public.entregas_documento_alumno.ocr_error is 'Error si no hubo extracción.';
 
 create index if not exists idx_entregas_doc_cuenta on public.entregas_documento_alumno (cuenta_id);
 

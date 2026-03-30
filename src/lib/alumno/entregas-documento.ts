@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ESTADOS_ENTREGA_DOCUMENTO, type EstadoEntregaDocumentoPersistido } from "@/lib/alumno/estado-documento";
+import type { CampoOcrCelda } from "@/lib/ocr/campos-ocr-vista";
+import { parseCamposOcrDesdeJson } from "@/lib/ocr/campos-ocr-vista";
 import { slugificar, TIPOS_DOCUMENTO, type TipoDocumentoClave } from "@/lib/nombre-archivo";
 
 const TABLA_ENTREGAS = "entregas_documento_alumno";
@@ -50,6 +52,10 @@ export type FilaEntrega = {
 	ruta_storage: string;
 	validacion_automatica: boolean;
 	etiqueta_personalizada: string | null;
+	ocr_campos: Record<string, CampoOcrCelda> | null;
+	ocr_tramite: string | null;
+	ocr_extraido_en: string | null;
+	ocr_error: string | null;
 };
 
 export async function listarEntregasPorCuenta(
@@ -58,7 +64,9 @@ export async function listarEntregasPorCuenta(
 ): Promise<FilaEntrega[]> {
 	const { data, error } = await supabase
 		.from(TABLA_ENTREGAS)
-		.select("tipo_documento, estado, motivo_rechazo, ruta_storage, validacion_automatica, etiqueta_personalizada")
+		.select(
+			"tipo_documento, estado, motivo_rechazo, ruta_storage, validacion_automatica, etiqueta_personalizada, ocr_campos, ocr_tramite, ocr_extraido_en, ocr_error",
+		)
 		.eq("cuenta_id", cuentaId);
 	if (error) {
 		console.error("listarEntregasPorCuenta", error);
@@ -76,6 +84,13 @@ export async function listarEntregasPorCuenta(
 				r.etiqueta_personalizada != null && String(r.etiqueta_personalizada).trim() !== ""
 					? String(r.etiqueta_personalizada).trim()
 					: null,
+			ocr_campos: parseCamposOcrDesdeJson(r.ocr_campos),
+			ocr_tramite: r.ocr_tramite != null && String(r.ocr_tramite).trim() !== "" ? String(r.ocr_tramite).trim() : null,
+			ocr_extraido_en:
+				r.ocr_extraido_en != null && String(r.ocr_extraido_en).trim() !== ""
+					? String(r.ocr_extraido_en).trim()
+					: null,
+			ocr_error: r.ocr_error != null && String(r.ocr_error).trim() !== "" ? String(r.ocr_error).trim() : null,
 		};
 	});
 }
@@ -88,6 +103,10 @@ export async function upsertEntregaDocumento(
 		estado: EstadoEntregaDocumentoPersistido;
 		rutaStorage: string;
 		validacionAutomatica: boolean;
+		ocrCampos: Record<string, CampoOcrCelda> | null;
+		ocrTramite: string | null;
+		ocrExtraidoEn: string | null;
+		ocrError: string | null;
 	},
 ): Promise<{ error: Error | null }> {
 	const ahora = new Date().toISOString();
@@ -102,6 +121,10 @@ export async function upsertEntregaDocumento(
 			etiqueta_personalizada: null,
 			actualizado_en: ahora,
 			subido_en: ahora,
+			ocr_campos: params.ocrCampos,
+			ocr_tramite: params.ocrTramite,
+			ocr_extraido_en: params.ocrExtraidoEn,
+			ocr_error: params.ocrError,
 		},
 		{ onConflict: "cuenta_id,tipo_documento" },
 	);
@@ -117,6 +140,10 @@ export async function upsertEntregaAdjuntoOrientador(
 		rutaStorage: string;
 		validacionAutomatica: boolean;
 		etiquetaPersonalizada: string | null;
+		ocrCampos: Record<string, CampoOcrCelda> | null;
+		ocrTramite: string | null;
+		ocrExtraidoEn: string | null;
+		ocrError: string | null;
 	},
 ): Promise<{ error: Error | null }> {
 	const ahora = new Date().toISOString();
@@ -131,9 +158,45 @@ export async function upsertEntregaAdjuntoOrientador(
 			etiqueta_personalizada: params.etiquetaPersonalizada,
 			actualizado_en: ahora,
 			subido_en: ahora,
+			ocr_campos: params.ocrCampos,
+			ocr_tramite: params.ocrTramite,
+			ocr_extraido_en: params.ocrExtraidoEn,
+			ocr_error: params.ocrError,
 		},
 		{ onConflict: "cuenta_id,tipo_documento" },
 	);
+	return { error: error ? new Error(error.message) : null };
+}
+
+export async function actualizarOcrCamposEnEntrega(
+	supabase: SupabaseClient,
+	cuentaId: string,
+	tipoDocumento: TipoDocumentoClave,
+	nuevoOcrCampos: Record<string, CampoOcrCelda>,
+): Promise<{ error: Error | null }> {
+	const { data: existente, error: errQ } = await supabase
+		.from(TABLA_ENTREGAS)
+		.select("ruta_storage")
+		.eq("cuenta_id", cuentaId)
+		.eq("tipo_documento", tipoDocumento)
+		.maybeSingle();
+	if (errQ) {
+		return { error: new Error(errQ.message) };
+	}
+	const ruta = existente?.ruta_storage != null ? String(existente.ruta_storage).trim() : "";
+	if (!ruta) {
+		return { error: new Error("No hay documento subido para este tipo") };
+	}
+	const ahora = new Date().toISOString();
+	const { error } = await supabase
+		.from(TABLA_ENTREGAS)
+		.update({
+			ocr_campos: nuevoOcrCampos,
+			ocr_error: null,
+			actualizado_en: ahora,
+		})
+		.eq("cuenta_id", cuentaId)
+		.eq("tipo_documento", tipoDocumento);
 	return { error: error ? new Error(error.message) : null };
 }
 

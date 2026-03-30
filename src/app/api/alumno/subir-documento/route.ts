@@ -13,11 +13,35 @@ import {
 	nombreArchivoEstandar,
 	type TipoDocumentoClave,
 } from "@/lib/nombre-archivo";
+import {
+	extraerCamposOcrServidor,
+	tramiteOcrDesdeTipoDocumento,
+	type ResultadoExtraccionServidor,
+} from "@/lib/ocr/extract-servidor";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
+/** Permite que OCR + subida no corten en 10s (p. ej. Vercel). Ajusta según tu plan. */
+export const maxDuration = 120;
 
 const TAMANO_MAX_BYTES = 15 * 1024 * 1024;
+
+function mensajeErrorStorage(err: { message?: string }): string {
+	const msg = (err.message ?? "").trim();
+	if (!msg) {
+		return "No se pudo guardar el archivo en el almacén. Intenta de nuevo.";
+	}
+	if (/bucket not found|not found/i.test(msg)) {
+		return `Storage: ${msg}. Crea el bucket en Supabase con el mismo nombre que AIDA_DOCUMENTOS_BUCKET.`;
+	}
+	if (/row level security|rls|permission|policy/i.test(msg)) {
+		return `Storage (políticas): ${msg}. Revisa políticas del bucket o que el servidor use SUPABASE_SERVICE_ROLE_KEY.`;
+	}
+	if (/jwt|invalid|signature/i.test(msg)) {
+		return "Storage: clave de Supabase inválida. Comprueba SUPABASE_SERVICE_ROLE_KEY en el servidor.";
+	}
+	return `No se pudo guardar el archivo: ${msg.slice(0, 280)}`;
+}
 
 function extensionDesdeNombre(nombreArchivo: string): string {
 	const i = nombreArchivo.lastIndexOf(".");
@@ -96,16 +120,15 @@ export async function POST(request: Request) {
 		return NextResponse.json({ error: msg }, { status: 400 });
 	}
 
-	const bytes = new Uint8Array(await archivo.arrayBuffer());
+	let bytes: Uint8Array;
+	try {
+		bytes = new Uint8Array(await archivo.arrayBuffer());
+	} catch (e) {
+		console.error("subir-documento lectura archivo", e);
+		return NextResponse.json({ error: "No se pudo leer el archivo. Prueba otro formato o tamaño." }, { status: 400 });
+	}
 	const contentType = archivo.type || "application/octet-stream";
 
-	/*
-	 * --- Aquí iría validación automática del documento (p. ej. OCR / API externa) ---
-	 * Tras analizar el archivo y el tipo esperado, podrías:
-	 * - devolver 422 + mensaje si el alumno debe confirmar antes de subir, o
-	 * - fijar estado validado + validacionAutomatica true solo si el sistema está 100% seguro.
-	 * Mientras no exista esa capa, todas las subidas quedan en revisión manual.
-	 */
 	const estado = ESTADOS_ENTREGA_DOCUMENTO.PENDIENTE_REVISION_MANUAL;
 	const validacionAutomatica = false;
 
@@ -123,11 +146,33 @@ export async function POST(request: Request) {
 		});
 		if (errSubida) {
 			console.error("subir-documento storage", errSubida);
-			return NextResponse.json(
-				{ error: "No se pudo guardar el archivo. Intenta de nuevo." },
-				{ status: 500 },
-			);
+			return NextResponse.json({ error: mensajeErrorStorage(errSubida) }, { status: 500 });
 		}
+
+		let ocrRes: ResultadoExtraccionServidor;
+		try {
+			ocrRes = await extraerCamposOcrServidor(
+				Buffer.from(bytes),
+				archivo.name,
+				contentType,
+				tipo,
+			);
+		} catch (ocrEx) {
+			console.error("subir-documento OCR excepción", ocrEx);
+			ocrRes = {
+				ok: false,
+				error:
+					ocrEx instanceof Error
+						? `ocr_error: ${ocrEx.message}`.slice(0, 500)
+						: "ocr_excepcion",
+				tramite: tramiteOcrDesdeTipoDocumento(tipo),
+			};
+		}
+		const ahoraIso = new Date().toISOString();
+		const ocrCampos = ocrRes.ok ? ocrRes.fields : null;
+		const ocrTramite = ocrRes.tramite;
+		const ocrExtraidoEn = ocrRes.ok ? ahoraIso : null;
+		const ocrError = ocrRes.ok ? null : ocrRes.error.slice(0, 500);
 
 		const { error: errDb } = await upsertEntregaDocumento(supabase, {
 			cuentaId: payloadAlumno.cuentaId,
@@ -135,6 +180,10 @@ export async function POST(request: Request) {
 			estado,
 			rutaStorage: nombreTecnico,
 			validacionAutomatica,
+			ocrCampos,
+			ocrTramite,
+			ocrExtraidoEn,
+			ocrError,
 		});
 		if (errDb) {
 			console.error("subir-documento BD", errDb);
@@ -152,9 +201,19 @@ export async function POST(request: Request) {
 			nombreTecnico,
 			estado,
 			validacionAutomatica,
+			ocr: {
+				exitoso: ocrRes.ok,
+				campos: ocrCampos,
+				tramite: ocrTramite,
+				error: ocrError,
+			},
 		});
 	} catch (e) {
 		console.error("subir-documento", e);
-		return NextResponse.json({ error: "Error al subir el archivo" }, { status: 500 });
+		const hint =
+			e instanceof Error && e.message
+				? `Error al subir: ${e.message.slice(0, 200)}`
+				: "Error al subir el archivo. Revisa la consola del servidor.";
+		return NextResponse.json({ error: hint }, { status: 500 });
 	}
 }

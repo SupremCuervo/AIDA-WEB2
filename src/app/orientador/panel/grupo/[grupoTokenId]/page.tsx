@@ -8,6 +8,7 @@ import { GRADO_ESCOLAR_MAX } from "@/lib/padron/grado-alumno";
 import { alumnoRequiereCarrera } from "@/lib/padron/requiere-carrera";
 import type { TipoDocumentoClave } from "@/lib/nombre-archivo";
 import { confirmarAccionDestructiva } from "@/lib/orientador/confirmar-accion-destructiva";
+import { DURACION_MENSAJE_EMERGENTE_MS } from "@/lib/ui/duracion-mensaje-emergente-ms";
 
 type AlumnoFila = {
 	padronId: string;
@@ -237,6 +238,30 @@ export default function OrientadorGrupoAlumnosPage() {
 		setFiltroNombreAlumno("");
 		setCarreraMasivaSel("");
 	}, [gradoVista]);
+
+	useEffect(() => {
+		if (!mensaje.trim()) {
+			return;
+		}
+		const id = window.setTimeout(() => setMensaje(""), DURACION_MENSAJE_EMERGENTE_MS);
+		return () => window.clearTimeout(id);
+	}, [mensaje]);
+
+	useEffect(() => {
+		if (!error.trim()) {
+			return;
+		}
+		const id = window.setTimeout(() => setError(""), DURACION_MENSAJE_EMERGENTE_MS);
+		return () => window.clearTimeout(id);
+	}, [error]);
+
+	useEffect(() => {
+		if (!logsError.trim()) {
+			return;
+		}
+		const id = window.setTimeout(() => setLogsError(""), DURACION_MENSAJE_EMERGENTE_MS);
+		return () => window.clearTimeout(id);
+	}, [logsError]);
 
 	const alumnosPorGradoVista = useMemo(() => {
 		if (gradoVista === "" || !gradosDisponibles.includes(gradoVista)) {

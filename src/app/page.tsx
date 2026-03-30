@@ -13,42 +13,46 @@ export default function HomePage() {
 					priority
 					className="h-auto w-auto max-w-[min(100%,280px)]"
 				/>
-				<p className="max-w-md text-sm text-slate-600">
+				<p className="max-w-md text-xl font-bold text-slate-700 sm:text-2xl">
 					Selecciona tu rol para continuar.
 				</p>
 			</div>
 
-			<div className="grid w-full max-w-2xl gap-6 sm:grid-cols-2">
+			<div className="grid w-full max-w-4xl gap-8 sm:grid-cols-2">
 				<Link
 					href="/alumno"
-					className="group flex flex-col items-center gap-4 rounded-2xl border-2 border-slate-200 bg-white p-8 shadow-sm transition hover:border-sky-400 hover:shadow-md"
+					className="group flex min-h-[min(100%,22rem)] flex-col items-center justify-center gap-6 rounded-3xl border-2 border-slate-200 bg-white p-10 shadow-sm transition hover:border-sky-400 hover:shadow-lg sm:min-h-[24rem] sm:p-12"
 				>
-					<div className="relative h-40 w-40 overflow-hidden rounded-xl border-2 border-slate-200 ring-2 ring-transparent transition group-hover:border-sky-300 group-hover:ring-sky-100">
+					<div className="relative h-48 w-48 overflow-hidden rounded-2xl border-2 border-slate-200 ring-2 ring-transparent transition group-hover:border-sky-300 group-hover:ring-sky-100 sm:h-56 sm:w-56">
 						<Image
 							src="/imagenes/Inicio/alumno.png"
 							alt="Alumno"
 							fill
 							className="object-cover"
-							sizes="160px"
+							sizes="(max-width: 640px) 192px, 224px"
 						/>
 					</div>
-					<span className="text-lg font-semibold text-slate-800">Alumno</span>
+					<span className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+						Alumno
+					</span>
 				</Link>
 
 				<Link
 					href="/orientador"
-					className="group flex flex-col items-center gap-4 rounded-2xl border-2 border-slate-200 bg-white p-8 shadow-sm transition hover:border-emerald-400 hover:shadow-md"
+					className="group flex min-h-[min(100%,22rem)] flex-col items-center justify-center gap-6 rounded-3xl border-2 border-slate-200 bg-white p-10 shadow-sm transition hover:border-violet-400 hover:shadow-lg sm:min-h-[24rem] sm:p-12"
 				>
-					<div className="relative h-40 w-40 overflow-hidden rounded-xl border-2 border-slate-200 ring-2 ring-transparent transition group-hover:border-emerald-300 group-hover:ring-emerald-100">
+					<div className="relative h-48 w-48 overflow-hidden rounded-2xl border-2 border-slate-200 ring-2 ring-transparent transition group-hover:border-violet-300 group-hover:ring-violet-100 sm:h-56 sm:w-56">
 						<Image
 							src="/imagenes/Inicio/orientador.png"
 							alt="Orientador"
 							fill
 							className="object-cover"
-							sizes="160px"
+							sizes="(max-width: 640px) 192px, 224px"
 						/>
 					</div>
-					<span className="text-lg font-semibold text-slate-800">Orientador</span>
+					<span className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+						Orientador
+					</span>
 				</Link>
 			</div>
 		</main>

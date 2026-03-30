@@ -42,3 +42,19 @@ export function gradoMostradoParaAlumno(
 			: "";
 	return o || gradoToken;
 }
+
+const GRADO_ETIQUETA_VISTA: Record<string, string> = {
+	"1": "PRIMERO",
+};
+
+/** Vista alumno: grado numérico `1` → `PRIMERO`; cualquier otro valor se muestra igual. */
+export function gradoEtiquetaParaVistaAlumno(grado: string | null | undefined): string {
+	if (grado == null) {
+		return "";
+	}
+	const t = String(grado).trim();
+	if (t === "") {
+		return "";
+	}
+	return GRADO_ETIQUETA_VISTA[t] ?? t;
+}

@@ -150,6 +150,10 @@ export async function GET(
 				motivoRechazo,
 				puedeDescargar: Boolean(f?.ruta_storage),
 				validacionAutomatica,
+				ocrCampos: f?.ocr_campos ?? null,
+				ocrTramite: f?.ocr_tramite ?? null,
+				ocrExtraidoEn: f?.ocr_extraido_en ?? null,
+				ocrError: f?.ocr_error ?? null,
 			};
 		});
 
@@ -178,6 +182,10 @@ export async function GET(
 					puedeDescargar: Boolean(f.ruta_storage),
 					validacionAutomatica,
 					puedeEliminarOrientador: true,
+					ocrCampos: f.ocr_campos ?? null,
+					ocrTramite: f.ocr_tramite ?? null,
+					ocrExtraidoEn: f.ocr_extraido_en ?? null,
+					ocrError: f.ocr_error ?? null,
 				};
 			});
 

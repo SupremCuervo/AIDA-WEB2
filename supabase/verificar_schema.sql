@@ -50,7 +50,11 @@ FROM (
 		('padron_alumnos', 'carrera_id'),
 		('padron_alumnos', 'matricula'),
 		('padron_alumnos', 'archivo_muerto_en'),
-		('entregas_documento_alumno', 'etiqueta_personalizada')
+		('entregas_documento_alumno', 'etiqueta_personalizada'),
+		('entregas_documento_alumno', 'ocr_campos'),
+		('entregas_documento_alumno', 'ocr_tramite'),
+		('entregas_documento_alumno', 'ocr_extraido_en'),
+		('entregas_documento_alumno', 'ocr_error')
 ) AS c(tabla, columna)
 ORDER BY c.tabla, c.columna;
 
