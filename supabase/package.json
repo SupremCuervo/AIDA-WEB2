@@ -1,0 +1,8 @@
+{
+	"name": "aida-supabase-cli-local",
+	"private": true,
+	"description": "CLI de Supabase solo para esta carpeta (deploy de Edge Functions). Evita npm install -g.",
+	"devDependencies": {
+		"supabase": "2.89.1"
+	}
+}

@@ -1,0 +1,208 @@
+================================================================================
+AIDA — Módulo de auditoría (logs): tabla, triggers, funciones y mensajes
+================================================================================
+Última referencia de código: supabase/migracion_logs_acciones_descriptivas.sql,
+aida_base_completa.sql, src/lib/orientador/audit-registrar.ts,
+src/app/api/orientador/logs/route.ts
+
+--------------------------------------------------------------------------------
+1. TABLA public.logs
+--------------------------------------------------------------------------------
+Almacena cada evento de auditoría.
+
+Columnas principales:
+- id              uuid, PK, default gen_random_uuid()
+- creado_en       timestamptz, default now()  → fecha y hora automáticas
+- actor_tipo      text: 'orientador' | 'sistema' | 'alumno'
+- actor_id        uuid (p. ej. id del orientador), nullable
+- actor_etiqueta  text legible (nombre o correo del orientador, o "Sistema")
+- accion          texto descriptivo del hecho (español en instalaciones actuales)
+- entidad         nombre lógico de tabla/recurso (p. ej. padron_alumnos)
+- entidad_id      id de fila afectada, nullable
+- detalle         jsonb: datos técnicos (operacion, antes, despues en triggers)
+- origen          'api' | 'trigger'
+
+Índices: creado_en DESC; (entidad, entidad_id).
+
+RLS: habilitado; el acceso desde la app Next usa service_role vía API.
+
+--------------------------------------------------------------------------------
+2. FUNCIÓN RPC: registrar_log (proceso almacenado de inserción)
+--------------------------------------------------------------------------------
+Nombre: public.registrar_log(...)
+Tipo: PL/pgSQL, SECURITY DEFINER
+
+Parámetros:
+- p_actor_tipo, p_actor_id, p_actor_etiqueta
+- p_accion, p_entidad, p_entidad_id
+- p_detalle jsonb opcional
+- p_origen 'api' o 'trigger'
+
+Efecto: INSERT en public.logs. Retorna uuid del registro.
+
+Quién la llama:
+- Otras funciones PL/pgSQL (aud_archivar_padrones, aud_reactivar_padron).
+- Cliente Supabase desde Node: supabase.rpc('registrar_log', { ... }) vía
+  registrarLogApi() en src/lib/orientador/audit-registrar.ts.
+
+--------------------------------------------------------------------------------
+3. FUNCIÓN AUXILIAR: logs_ref_expediente_padron
+--------------------------------------------------------------------------------
+Nombre: public.logs_ref_expediente_padron(p_id uuid, p_matricula text)
+Tipo: SQL, IMMUTABLE
+
+Devuelve la "referencia" de expediente para textos de log:
+- Si hay matrícula no vacía → esa matrícula (trim).
+- Si no → últimos 4 caracteres del UUID del padrón sin guiones.
+
+Se usa dentro del trigger y en aud_reactivar_padron.
+
+--------------------------------------------------------------------------------
+4. FUNCIONES DE NEGOCIO QUE ESCRIBEN LOG (API / RPC)
+--------------------------------------------------------------------------------
+
+4.1 aud_archivar_padrones(p_padron_ids, p_grupo_token_id, p_actor_*)
+    - Marca archivo_muerto_en en uno o muchos padron_alumnos.
+    - Antes de los UPDATE: set_config('aida.omitir_log_trigger_padron','1') para
+      que el trigger del padrón NO duplique filas por cada fila actualizada.
+    - Tras los UPDATE: registrar_log con origen 'api' y mensajes del tipo:
+      • "Archivo muerto: sin cambios"
+      • "Un expediente pasado a archivo muerto"
+      • "Archivo muerto: N expedientes actualizados"
+
+4.2 aud_reactivar_padron(p_padron_id, p_actor_*)
+    - Quita archivo_muerto_en de un padrón.
+    - Usa la misma variable de sesión para omitir el trigger en ese UPDATE.
+    - registrar_log: "Reactivación de expediente {ref}" (ref = logs_ref_expediente_padron).
+
+Invocación típica: rutas API orientador archivo-muerto (archivar / reactivar).
+
+--------------------------------------------------------------------------------
+5. TRIGGER ÚNICO POR FILA: logs_trigger_auditoria_fila
+--------------------------------------------------------------------------------
+Nombre: public.logs_trigger_auditoria_fila()
+Tipo: TRIGGER FUNCTION, PL/pgSQL, SECURITY DEFINER
+
+Momento: AFTER INSERT / UPDATE / DELETE (según tabla; ver sección 6).
+
+Comportamiento general:
+- Construye detalle jsonb: operacion (INSERT/UPDATE/DELETE), "antes", "despues".
+- Calcula accion en español según tg_table_name y tg_op.
+- Inserta en logs con actor_tipo 'sistema', actor_etiqueta 'Sistema', origen 'trigger'.
+
+Casos especiales en padron_alumnos (UPDATE):
+- Si current_setting('aida.omitir_log_trigger_padron') = '1' → no inserta fila (return NEW).
+- Si solo cambia archivo_muerto_en y el resto de columnas relevantes igual → no inserta
+  (lo cubre la API: PATCH solo estado, o las RPC de archivo/reactivar).
+
+Si no hay rama específica para la tabla, mensaje genérico:
+  "{Operación} en {nombre_tabla}" (palabras sustituyendo guiones bajos).
+
+--------------------------------------------------------------------------------
+6. LISTA DE DISPARADORES (TRIGGERS) Y EVENTOS
+--------------------------------------------------------------------------------
+Todos ejecutan: public.logs_trigger_auditoria_fila()
+
+Tabla                          Trigger                         Evento
+------------------------------ ------------------------------- ------------------
+padron_alumnos                 trg_logs_padron_alumnos         INSERT, UPDATE
+grupo_tokens                   trg_logs_grupo_tokens           INSERT, UPDATE
+entregas_documento_alumno      trg_logs_entregas_documento   INSERT, UPDATE
+orientador_plantillas          trg_logs_orientador_plantillas INSERT, UPDATE
+cuentas_alumno                 trg_logs_cuentas_alumno        INSERT, UPDATE, DELETE
+carreras                       trg_logs_carreras               INSERT, UPDATE, DELETE
+institucion_grupos             trg_logs_institucion_grupos    INSERT, UPDATE, DELETE
+orientador_semestre_fechas     trg_logs_orientador_semestre   INSERT, UPDATE
+cargas_alumnos                 trg_logs_cargas_alumnos        INSERT, DELETE *
+* cargas_alumnos: solo si la tabla existe (extensión cargas_alumnos_extension.sql).
+
+Notas:
+- DELETE en padron_alumnos, grupo_tokens, orientador_plantillas NO dispara trigger
+  (la API registra el borrado con actor orientador y texto en español).
+- entregas_documento_alumno: sin trigger en DELETE (puede registrarse vía API).
+
+--------------------------------------------------------------------------------
+7. CATÁLOGO DE MENSAJES (accion) POR ORIGEN TRIGGER
+--------------------------------------------------------------------------------
+Los textos exactos pueden incluir datos dinámicos (ref, nombres, grados).
+
+padron_alumnos
+  INSERT  → "Expediente {ref} creado"
+  UPDATE  → "Actualización de {lista campos} al expediente {ref}"
+            Campos posibles en lista: nombre, grupo o sección, grado, carrera,
+            matrícula, reactivación, archivo muerto (según qué cambió).
+            Si no se detecta cambio en esas ramas → "Actualización de expediente {ref}"
+
+grupo_tokens
+  INSERT  → "Token de acceso creado para {grado}°{grupo}"
+  UPDATE  → "Token de acceso actualizado ({grado}°{grupo})"
+
+entregas_documento_alumno
+  INSERT  → "Nuevo documento subido al expediente {ref}"
+  UPDATE  → Si cambia estado: "Estado de documento actualizado en expediente {ref} ({tipo})"
+            Si no: "Documento actualizado en expediente {ref}"
+
+orientador_plantillas
+  INSERT  → "Nueva plantilla subida"
+  UPDATE  → "Plantilla actualizada"
+
+cuentas_alumno
+  INSERT  → "Cuenta de acceso creada para expediente {ref}"
+  UPDATE  → "Cuenta de alumno actualizada"
+  DELETE  → genérico o rama por defecto (ver §5)
+
+carreras
+  INSERT  → "Nueva carrera en el catálogo: {nombre o código}"
+  UPDATE  → "Carrera actualizada en el catálogo: {nombre o código}"
+  DELETE  → "Carrera eliminada del catálogo: {nombre o código}"
+
+institucion_grupos
+  INSERT  → "Nueva sección en catálogo ({grado}° {grupo})"
+  UPDATE  → "Sección del catálogo actualizada"
+  DELETE  → "Sección eliminada del catálogo"
+
+orientador_semestre_fechas
+  UPDATE  → Si cambian fechas o nombre_anios: "Periodos actualizados"
+            Si no: "Calendario escolar actualizado"
+
+cargas_alumnos
+  INSERT  → "Creación de carga de alumnos"
+  DELETE  → "Carga de alumnos eliminada"
+
+--------------------------------------------------------------------------------
+8. LOGS DESDE API (origen = 'api', actor orientador típico)
+--------------------------------------------------------------------------------
+Implementados vía registrarLogApi() y/o RPC aud_*:
+
+- PATCH padrón: solo cambio de estado activo/inactivo (archivo muerto):
+  "Reactivación de expediente {ref}" | "Expediente {ref} pasado a archivo muerto"
+- DELETE padrón:
+  "Eliminación de expediente {ref} ({nombre_completo})"
+- DELETE grupo token:
+  "Eliminación de token de acceso ({grado}°{grupo})"
+- DELETE plantilla:
+  "Plantilla eliminada: {título o archivo}"
+- DELETE adjunto orientador:
+  "Documento de orientador eliminado ({tipo})"
+- aud_archivar_padrones → mensajes del §4.1
+- aud_reactivar_padron → "Reactivación de expediente {ref}"
+
+La etiqueta de usuario en API usa nombre del orientador; si no hay, el correo.
+
+--------------------------------------------------------------------------------
+9. LECTURA EN LA APLICACIÓN WEB
+--------------------------------------------------------------------------------
+- GET /api/orientador/logs — lista los últimos registros (límite configurable en route).
+- Panel orientador: sección "Historial" (HistorialAccionesOrientador.tsx).
+- Página grupo (orientador): modal "Historial / auditoría" (mismo endpoint).
+
+--------------------------------------------------------------------------------
+10. ARCHIVOS SQL DE REFERENCIA
+--------------------------------------------------------------------------------
+- aida-web/supabase/aida_base_completa.sql     — esquema inicial + auditoría
+- aida-web/supabase/migracion_logs_acciones_descriptivas.sql — migración en BD existente
+- aida-web/supabase/aida_eliminar_todas_las_tablas.sql — drops de logs y funciones
+
+================================================================================
+FIN
+================================================================================

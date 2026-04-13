@@ -1,0 +1,15 @@
+# Configuración local CLI. Despliegue: supabase functions deploy
+
+[functions.orientador-sync-auth]
+verify_jwt = false
+
+[functions.alumno-validar-clave]
+verify_jwt = false
+
+[functions.alumno-acceso]
+verify_jwt = false
+
+# Puerta: si true, a veces "Invalid JWT" al invocar desde la app aun con sesión válida.
+# Dentro de la función se valida el Bearer con auth.getUser.
+[functions.aida-data]
+verify_jwt = false
