@@ -9,7 +9,8 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"deploy:function:aida-data": "npx --yes supabase@2.84.2 functions deploy aida-data --no-verify-jwt --use-api",
-		"deploy:function:aida-data:docker": "npx --yes supabase@2.84.2 functions deploy aida-data --no-verify-jwt"
+		"deploy:function:aida-data:docker": "npx --yes supabase@2.84.2 functions deploy aida-data --no-verify-jwt",
+		"push:github-web": "cd .. && git subtree push --prefix=aida-web aida-web2 main"
 	},
 	"dependencies": {
 		"@supabase/supabase-js": "2.49.4",
