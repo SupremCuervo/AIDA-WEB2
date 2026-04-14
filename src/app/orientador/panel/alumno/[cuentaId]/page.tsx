@@ -10,6 +10,7 @@ import {
 	entradasFieldsOrdenadas,
 	type CampoOcrCelda,
 } from "@/lib/ocr/campos-ocr-vista";
+import { fechaOcrUiCorta, mensajeOcrUiCorto } from "@/lib/ocr/mensaje-ocr-ui-corto";
 import type { TipoDocumentoClave } from "@/lib/nombre-archivo";
 
 const TIPOS_DESCARGA_EXP: { tipo: TipoDocumentoClave; etiqueta: string }[] = [
@@ -534,14 +535,14 @@ export default function OrientadorExpedientePage() {
 																	{d.ocrExtraidoEn ? (
 																		<>
 																			{" "}
-																			· {new Date(d.ocrExtraidoEn).toLocaleString("es-MX")}
+																			· {fechaOcrUiCorta(d.ocrExtraidoEn)}
 																		</>
 																	) : null}
 																</p>
 															) : null}
 															{d.ocrError ? (
 																<p className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-amber-900">
-																	{d.ocrError}
+																	{mensajeOcrUiCorto(d.ocrError)}
 																</p>
 															) : null}
 															{filasOcr.length > 0 ? (

@@ -195,24 +195,22 @@ export async function GET() {
 			};
 		}
 
-		const resumen = listaIg.map((ig) => {
-			const g = tokenPorSeccion.get(ig.id) ?? null;
-			const gradoTok = String(ig.grado);
-			const grupoLetra = String(ig.grupo).toUpperCase();
-			return armarResumenFila(g, gradoTok, grupoLetra, ig.id);
-		});
-
-		const idsEnResumen = new Set(
-			resumen.map((r) => r.id).filter((x): x is string => typeof x === "string" && x.length > 0),
-		);
-		for (const t of tokens) {
-			if (idsEnResumen.has(t.id)) {
-				continue;
-			}
-			const { grado: gd, grupo: gp } = normalizarGradoGrupoToken(t);
-			const gradoTok = gd || "1";
-			resumen.push(armarResumenFila(t, gradoTok, gp || t.grupo, t.institucion_grupo_id));
-		}
+		// Una fila por sección (institucion_grupos). `tieneToken` indica si hay grupo_tokens;
+		// sin token, `id` queda null y el destino para PATCH puede ser `institucionGrupoId`
+		// (el padrón resuelve token si existe después).
+		const resumen = listaIg
+			.map((ig) => {
+				const g = tokenPorSeccion.get(ig.id) ?? null;
+				const gradoTok = String(ig.grado);
+				const grupoLetra = String(ig.grupo).toUpperCase();
+				return armarResumenFila(g, gradoTok, grupoLetra, ig.id);
+			})
+			.filter((r) => {
+				const tok = r.id != null && String(r.id).trim() !== "";
+				const ig =
+					r.institucionGrupoId != null && String(r.institucionGrupoId).trim() !== "";
+				return tok || ig;
+			});
 
 		resumen.sort((a, b) => {
 			const na = Number.parseInt(String(a.grado), 10) || 0;

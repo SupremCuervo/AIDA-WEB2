@@ -39,6 +39,7 @@ describe("jwt-cookies (sesión — base para L-01, L-13)", () => {
 			orientadorId: "o1",
 			email: "o@test.local",
 			nombre: "Orientador",
+			rolPanel: "jefe",
 		});
 		const p = await verificarTokenOrientador(t);
 		expect(p.orientadorId).toBe("o1");

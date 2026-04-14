@@ -5,13 +5,18 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import {
 	CLAVES_DATO_ALUMNO,
 	etiquetaClave,
+	PLANTILLA_FUENTE_FAMILIA_CSS,
+	PLANTILLA_FUENTE_PT_DEFECTO,
 	type CampoPlantillaRelleno,
 	type ClaveDatoAlumno,
 } from "@/lib/orientador/plantilla-definicion-relleno";
 
+const ZOOM_BASE_CAMPO = 1.35;
+
 function PaginaConCampos({
 	pdf,
 	pageIndex,
+	zoom,
 	campos,
 	modoAgregar,
 	seleccionId,
@@ -22,6 +27,7 @@ function PaginaConCampos({
 }: {
 	pdf: PDFDocumentProxy;
 	pageIndex: number;
+	zoom: number;
 	campos: CampoPlantillaRelleno[];
 	modoAgregar: boolean;
 	seleccionId: string | null;
@@ -34,30 +40,40 @@ function PaginaConCampos({
 	const wrapRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
-		let cancel = false;
+		let cancelled = false;
+		let renderTask: { cancel: () => void; promise: Promise<void> } | null = null;
 		const canvas = canvasRef.current;
 		if (!canvas) {
 			return;
 		}
 		(async () => {
-			const page = await pdf.getPage(pageIndex + 1);
-			if (cancel) {
-				return;
+			try {
+				const page = await pdf.getPage(pageIndex + 1);
+				if (cancelled) {
+					return;
+				}
+				const ctx = canvas.getContext("2d");
+				if (!ctx) {
+					return;
+				}
+				const scale = zoom;
+				const viewport = page.getViewport({ scale });
+				canvas.width = viewport.width;
+				canvas.height = viewport.height;
+				if (cancelled) {
+					return;
+				}
+				renderTask = page.render({ canvasContext: ctx, viewport });
+				await renderTask.promise;
+			} catch {
+				/* render cancelado o canvas liberado */
 			}
-			const ctx = canvas.getContext("2d");
-			if (!ctx) {
-				return;
-			}
-			const scale = 1.1;
-			const viewport = page.getViewport({ scale });
-			canvas.width = viewport.width;
-			canvas.height = viewport.height;
-			await page.render({ canvasContext: ctx, viewport }).promise;
 		})();
 		return () => {
-			cancel = true;
+			cancelled = true;
+			renderTask?.cancel();
 		};
-	}, [pdf, pageIndex]);
+	}, [pdf, pageIndex, zoom]);
 
 	const dePagina = campos.filter((c) => c.pageIndex === pageIndex);
 
@@ -95,7 +111,7 @@ function PaginaConCampos({
 		<div className="flex shrink-0 flex-col items-center">
 			<div
 				ref={wrapRef}
-				className="relative inline-block max-w-[min(100%,280px)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow"
+				className="relative inline-block max-w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow"
 			>
 				<canvas ref={canvasRef} className="block max-w-full" />
 				<button
@@ -120,39 +136,62 @@ function PaginaConCampos({
 					<div
 						key={c.id}
 						data-campo-pl
-						className={`absolute z-[2] max-w-[min(90%,12rem)] rounded border border-dashed border-emerald-600 bg-white/95 px-1 py-0.5 text-left shadow-sm ${
-							seleccionId === c.id ? "ring-2 ring-emerald-500" : ""
+						className={`absolute z-[2] w-[12rem] max-w-[85%] rounded border bg-white/90 shadow-sm ${
+							seleccionId === c.id ? "border-emerald-600 ring-2 ring-emerald-400" : "border-slate-400"
 						}`}
 						style={{
 							left: `${c.xPct}%`,
 							top: `${c.yPct}%`,
-							transform: "translate(-2px, -2px)",
+							transform: `scale(${ZOOM_BASE_CAMPO / zoom})`,
+							transformOrigin: "top left",
 						}}
 						onClick={(ev) => {
 							ev.stopPropagation();
 							onSelectCampo(c.id);
 						}}
+						onDoubleClick={(ev) => {
+							ev.stopPropagation();
+							onSelectCampo(c.id);
+							const target = ev.currentTarget.querySelector("textarea");
+							if (target instanceof HTMLTextAreaElement) {
+								target.focus();
+								target.select();
+							}
+						}}
 					>
 						<div
-							className="mb-0.5 flex cursor-grab items-center gap-1 border-b border-slate-200 pb-0.5 text-[9px] text-slate-600 active:cursor-grabbing"
+							className="flex cursor-grab items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-1 py-0.5 active:cursor-grabbing"
 							onPointerDown={(ev) => iniciarArrastre(c, ev)}
 						>
-							<span aria-hidden>⋮⋮</span>
-							<span>Mover</span>
-						</div>
-						<p className="text-[10px] font-semibold text-emerald-900">{etiquetaClave(c.clave)}</p>
-						{seleccionId === c.id ? (
 							<button
 								type="button"
-								className="mt-0.5 text-[10px] text-red-600 hover:underline"
+								className="rounded p-0.5 text-red-600 hover:bg-red-50"
 								onClick={(ev) => {
 									ev.stopPropagation();
 									onEliminarCampo(c.id);
 								}}
+								aria-label="Eliminar campo"
+								title="Eliminar campo"
 							>
-								Eliminar
+								🗑
 							</button>
-						) : null}
+							<span className="text-[10px] font-medium text-slate-500">{etiquetaClave(c.clave)}</span>
+						</div>
+						<textarea
+							defaultValue=""
+							rows={2}
+							placeholder="Campo de texto"
+							className="w-full min-h-[2.4rem] resize rounded-b bg-transparent px-1 py-1 text-slate-900 outline-none"
+							style={{
+								fontSize: `${Math.max(6, Math.min(c.fontSizePt, 48))}px`,
+								fontFamily: PLANTILLA_FUENTE_FAMILIA_CSS,
+								lineHeight: 1.25,
+							}}
+							onClick={(ev) => {
+								ev.stopPropagation();
+								onSelectCampo(c.id);
+							}}
+						/>
 					</div>
 				))}
 			</div>
@@ -184,6 +223,7 @@ export default function ModalDefinirCamposPlantillaEscaner({
 	const [claveNueva, setClaveNueva] = useState<ClaveDatoAlumno>("nombre_completo");
 	const [seleccionId, setSeleccionId] = useState<string | null>(null);
 	const [guardando, setGuardando] = useState(false);
+	const [zoom, setZoom] = useState(ZOOM_BASE_CAMPO);
 
 	useEffect(() => {
 		if (!abierto) {
@@ -192,6 +232,7 @@ export default function ModalDefinirCamposPlantillaEscaner({
 			setCampos([]);
 			setModoAgregar(false);
 			setSeleccionId(null);
+			setZoom(ZOOM_BASE_CAMPO);
 			setError("");
 			return;
 		}
@@ -243,7 +284,7 @@ export default function ModalDefinirCamposPlantillaEscaner({
 					pageIndex,
 					xPct,
 					yPct,
-					fontSizePt: 11,
+					fontSizePt: PLANTILLA_FUENTE_PT_DEFECTO,
 					clave: claveNueva,
 				},
 			]);
@@ -339,18 +380,39 @@ export default function ModalDefinirCamposPlantillaEscaner({
 					<span className="w-9" />
 				</div>
 
-				<div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto p-4">
+				<div className="shrink-0 border-b border-slate-100 px-4 py-2">
+					<div className="flex items-center justify-end gap-2 text-sm">
+						<button
+							type="button"
+							onClick={() => setZoom((z) => Math.max(0.8, Number((z - 0.1).toFixed(2))))}
+							className="rounded-lg border border-slate-300 px-2 py-1 hover:bg-slate-50"
+						>
+							-
+						</button>
+						<span className="min-w-[4rem] text-center font-semibold text-slate-700">{Math.round(zoom * 100)}%</span>
+						<button
+							type="button"
+							onClick={() => setZoom((z) => Math.min(2.4, Number((z + 0.1).toFixed(2))))}
+							className="rounded-lg border border-slate-300 px-2 py-1 hover:bg-slate-50"
+						>
+							+
+						</button>
+					</div>
+				</div>
+
+				<div className="min-h-0 flex-1 overflow-y-auto p-4">
 					{cargando ? (
 						<p className="text-center text-sm text-slate-600">Cargando PDF…</p>
 					) : error && !pdf ? (
 						<p className="text-center text-sm text-red-600">{error}</p>
 					) : pdf && numPages > 0 ? (
-						<div className="flex flex-row flex-nowrap gap-4 pb-2">
+						<div className="space-y-4 pb-2">
 							{Array.from({ length: numPages }, (_, i) => (
 								<PaginaConCampos
 									key={i}
 									pdf={pdf}
 									pageIndex={i}
+									zoom={zoom}
 									campos={campos}
 									modoAgregar={modoAgregar}
 									seleccionId={seleccionId}
@@ -387,8 +449,10 @@ export default function ModalDefinirCamposPlantillaEscaner({
 					<button
 						type="button"
 						onClick={() => setModoAgregar((m) => !m)}
-						className={`w-full rounded-xl py-2.5 text-sm font-semibold ${
-							modoAgregar ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-800"
+						className={`w-full rounded-xl border py-2.5 text-sm font-semibold ${
+							modoAgregar
+								? "border-[#2563EB] bg-[#60A5FA] text-white"
+								: "border-[#3B82F6] bg-[#DBEAFE] text-[#1D4ED8]"
 						}`}
 					>
 						{modoAgregar ? "Toca la página para colocar el campo (cancelar: clic otra vez arriba)" : "Agregar campo de texto +"}
@@ -398,7 +462,7 @@ export default function ModalDefinirCamposPlantillaEscaner({
 						type="button"
 						onClick={() => void crearPlantilla()}
 						disabled={guardando || !pdf}
-						className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-600 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+						className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#7C3AED] bg-[#EDE9FE] py-3 text-sm font-semibold text-[#5B21B6] hover:bg-[#DDD6FE] disabled:opacity-50"
 					>
 						{guardando ? "Guardando…" : "Crear plantilla"}
 						<span aria-hidden>📄</span>

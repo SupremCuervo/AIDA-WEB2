@@ -14,7 +14,25 @@ export const runtime = "nodejs";
 
 function extensionDesdeRuta(ruta: string): string {
 	const i = ruta.lastIndexOf(".");
-	return i >= 0 ? ruta.slice(i + 1) : "pdf";
+	return i >= 0 ? ruta.slice(i + 1).toLowerCase().replace(/[^a-z0-9]/g, "") : "pdf";
+}
+
+/** Storage a veces devuelve type vacío u octet-stream; sin MIME correcto el iframe no muestra PDF y el navegador “descarga” con nombre raro. */
+function mimeDesdeExtension(ext: string): string {
+	const e = ext.toLowerCase().replace(/^\./, "");
+	switch (e) {
+		case "pdf":
+			return "application/pdf";
+		case "png":
+			return "image/png";
+		case "jpg":
+		case "jpeg":
+			return "image/jpeg";
+		case "webp":
+			return "image/webp";
+		default:
+			return "application/octet-stream";
+	}
 }
 
 export async function GET(request: Request) {
@@ -83,7 +101,14 @@ export async function GET(request: Request) {
 		}
 
 		const bytes = await blob.arrayBuffer();
-		const tipoMime = blob.type || "application/octet-stream";
+		const inferido = mimeDesdeExtension(ext);
+		const tipoSupa = (blob.type ?? "").trim().toLowerCase();
+		const tipoMime =
+			tipoSupa !== "" && tipoSupa !== "application/octet-stream"
+				? blob.type
+				: inferido !== "application/octet-stream"
+					? inferido
+					: "application/octet-stream";
 		const encoded = encodeURIComponent(nombreLegible);
 		const disp = inline ? "inline" : "attachment";
 

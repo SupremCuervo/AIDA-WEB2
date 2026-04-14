@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import { GRADO_ESCOLAR_MAX } from "@/lib/padron/grado-alumno";
 import {
 	aplicarGradoMasivoInterno,
@@ -38,6 +39,39 @@ function fechaIsoDesdeDb(v: unknown): string | null {
 	return s;
 }
 
+async function archivarSeccionSinToken(
+	supabase: SupabaseClient,
+	igId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+	const { error } = await supabase
+		.from("padron_alumnos")
+		.update({ archivo_muerto_en: new Date().toISOString() })
+		.eq("institucion_grupo_id", igId)
+		.is("grupo_token_id", null)
+		.is("archivo_muerto_en", null);
+	if (error) {
+		console.error("promocion semestre archivar solo ig", error);
+		return { ok: false, error: mensajeCausaParaUsuario(error) };
+	}
+	return { ok: true };
+}
+
+async function archivarPorToken(
+	supabase: SupabaseClient,
+	grupoTokenId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+	const { error } = await supabase
+		.from("padron_alumnos")
+		.update({ archivo_muerto_en: new Date().toISOString() })
+		.eq("grupo_token_id", grupoTokenId)
+		.is("archivo_muerto_en", null);
+	if (error) {
+		console.error("promocion semestre archivar token", error);
+		return { ok: false, error: mensajeCausaParaUsuario(error) };
+	}
+	return { ok: true };
+}
+
 /**
  * Sube un grado a alumnos activos anclados solo a `institucion_grupo_id` (sin token).
  */
@@ -75,31 +109,22 @@ async function promocionarSeccionSinToken(
 }
 
 /**
- * Una promoción (+1 grado) para todas las secciones asignadas al ciclo (`periodo_institucion_grupos`).
+ * Una promoción (+1 grado) global para todos los grupos del sistema.
  * Orden: primero padrón sin token (de grado alto a bajo), luego tokens — evita doble ascenso en la misma corrida.
  */
 export async function ejecutarPromocionParaPeriodoSemestre(
 	supabase: SupabaseClient,
-	periodoSemestreId: string,
+	_periodoSemestreId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-	const { data: enlaces, error: errE } = await supabase
-		.from("periodo_institucion_grupos")
-		.select("institucion_grupo_id")
-		.eq("periodo_id", periodoSemestreId);
-	if (errE) {
-		return { ok: false, error: errE.message };
-	}
-	const igIds = [...new Set((enlaces ?? []).map((r) => r.institucion_grupo_id as string))];
-	if (igIds.length === 0) {
-		return { ok: true };
-	}
-
 	const { data: secciones, error: errS } = await supabase
 		.from("institucion_grupos")
-		.select("id, grado, grupo")
-		.in("id", igIds);
+		.select("id, grado, grupo");
 	if (errS) {
 		return { ok: false, error: errS.message };
+	}
+	const igIds = [...new Set((secciones ?? []).map((r) => r.id as string))];
+	if (igIds.length === 0) {
+		return { ok: true };
 	}
 
 	const ordenadas = [...(secciones ?? [])].sort((a, b) => Number(b.grado) - Number(a.grado));
@@ -110,6 +135,13 @@ export async function ejecutarPromocionParaPeriodoSemestre(
 		if (!/^[A-Z]$/u.test(letra)) {
 			continue;
 		}
+		if (g >= GRADO_ESCOLAR_MAX) {
+			const arc = await archivarSeccionSinToken(supabase, id);
+			if (!arc.ok) {
+				return { ok: false, error: arc.error };
+			}
+			continue;
+		}
 		const res = await promocionarSeccionSinToken(supabase, id, g, letra);
 		if (!res.ok) {
 			return { ok: false, error: res.error };
@@ -118,8 +150,7 @@ export async function ejecutarPromocionParaPeriodoSemestre(
 
 	const { data: tokens, error: errT } = await supabase
 		.from("grupo_tokens")
-		.select("id, grado")
-		.in("institucion_grupo_id", igIds);
+		.select("id, grado");
 	if (errT) {
 		return { ok: false, error: errT.message };
 	}
@@ -131,6 +162,10 @@ export async function ejecutarPromocionParaPeriodoSemestre(
 			g = 1;
 		}
 		if (g >= GRADO_ESCOLAR_MAX) {
+			const arc = await archivarPorToken(supabase, t.id as string);
+			if (!arc.ok) {
+				return { ok: false, error: arc.error };
+			}
 			continue;
 		}
 		const r = await aplicarGradoMasivoInterno(supabase, t.id as string, g + 1, {

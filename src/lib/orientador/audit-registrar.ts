@@ -1,13 +1,14 @@
 import type { PayloadOrientador } from "@/lib/alumno/jwt-cookies";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 
-function etiquetaActorOrientador(o: PayloadOrientador): string {
-	const n = o.nombre.trim();
-	if (n !== "") {
-		return n;
-	}
+/** Preferir correo en auditoría para poder filtrar y reconocer al orientador en el historial. */
+export function etiquetaAuditoriaOrientador(o: PayloadOrientador): string {
 	const e = o.email.trim();
-	return e !== "" ? e : o.orientadorId;
+	if (e !== "") {
+		return e;
+	}
+	const n = o.nombre.trim();
+	return n !== "" ? n : o.orientadorId;
 }
 
 /** Inserta en public.logs vía RPC (service_role). No lanza: errores solo a consola. */
@@ -24,7 +25,7 @@ export async function registrarLogApi(params: {
 		const { error } = await supabase.rpc("registrar_log", {
 			p_actor_tipo: o ? "orientador" : "sistema",
 			p_actor_id: o?.orientadorId ?? null,
-			p_actor_etiqueta: o ? etiquetaActorOrientador(o) : "sistema",
+			p_actor_etiqueta: o ? etiquetaAuditoriaOrientador(o) : "sistema",
 			p_accion: params.accion,
 			p_entidad: params.entidad,
 			p_entidad_id: params.entidadId ?? null,
@@ -54,6 +55,6 @@ export function argsRpcActorOrientador(orientador: PayloadOrientador | null): {
 	return {
 		p_actor_tipo: "orientador",
 		p_actor_id: orientador.orientadorId,
-		p_actor_etiqueta: etiquetaActorOrientador(orientador),
+		p_actor_etiqueta: etiquetaAuditoriaOrientador(orientador),
 	};
 }

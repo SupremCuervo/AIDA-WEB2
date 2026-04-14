@@ -3,20 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DURACION_MENSAJE_EMERGENTE_MS } from "@/lib/ui/duracion-mensaje-emergente-ms";
 
-/**
- * Columnas editables de la tabla. Teléfono, tutor y CURP: listos para enlazar a BD cuando existan;
- * hoy la API de expediente no los devuelve (quedan vacíos hasta integrar).
- */
-type ColKey = "grado" | "grupo" | "nombre" | "carrera" | "matricula" | "telefono" | "tutor" | "curp";
-
-type CarreraOpt = { id: string; nombre: string; codigo: string };
-
-type GrupoResumenCatalogo = {
-	id: string | null;
-	institucionGrupoId: string | null;
-	grado: string;
-	grupo: string;
-};
+/** Columnas editables de la tabla. */
+type ColKey = "grado" | "grupo" | "nombre" | "carrera" | "matricula";
 
 type AlumnoExp = {
 	nombreCompleto: string;
@@ -24,20 +12,16 @@ type AlumnoExp = {
 	grado: string;
 	grupo: string;
 	carreraNombre: string;
+	cuentaId: string | null;
+	documentosBaseSubidos?: number;
+	documentosBaseTotales?: number;
+	tieneDocumentoRechazado?: boolean;
+	tieneDocumentoAceptado?: boolean;
 };
 
 type FilaEditable = { id: string } & Record<ColKey, string>;
 
-const ORDEN_COLUMNAS: ColKey[] = [
-	"grado",
-	"grupo",
-	"nombre",
-	"carrera",
-	"matricula",
-	"telefono",
-	"tutor",
-	"curp",
-];
+const ORDEN_COLUMNAS: ColKey[] = ["grado", "grupo", "nombre", "carrera", "matricula"];
 
 const ETIQUETA_DEFAULT: Record<ColKey, string> = {
 	grado: "Grado",
@@ -45,9 +29,6 @@ const ETIQUETA_DEFAULT: Record<ColKey, string> = {
 	nombre: "Nombre",
 	carrera: "Carrera",
 	matricula: "Matrícula",
-	telefono: "Teléfono",
-	tutor: "Tutor",
-	curp: "CURP",
 };
 
 /** Columnas que el usuario marca en «Información» (sin escribir). */
@@ -55,22 +36,9 @@ const COLUMNAS_INFORMACION: { key: ColKey; descripcion: string }[] = [
 	{ key: "nombre", descripcion: "Nombre del alumno" },
 	{ key: "carrera", descripcion: "Carrera" },
 	{ key: "matricula", descripcion: "Matrícula" },
-	{ key: "telefono", descripcion: "Teléfono (BD pendiente)" },
-	{ key: "tutor", descripcion: "Tutor (BD pendiente)" },
-	{ key: "curp", descripcion: "CURP (BD pendiente)" },
 	{ key: "grado", descripcion: "Grado (en tabla)" },
 	{ key: "grupo", descripcion: "Grupo (en tabla)" },
 ];
-
-function idDestinoGrupoCatalogo(g: GrupoResumenCatalogo): string {
-	if (g.id != null && String(g.id).trim() !== "") {
-		return String(g.id);
-	}
-	if (g.institucionGrupoId != null && String(g.institucionGrupoId).trim() !== "") {
-		return String(g.institucionGrupoId);
-	}
-	return "";
-}
 
 function filaVacia(): FilaEditable {
 	return {
@@ -80,9 +48,6 @@ function filaVacia(): FilaEditable {
 		nombre: "",
 		carrera: "",
 		matricula: "",
-		telefono: "",
-		tutor: "",
-		curp: "",
 	};
 }
 
@@ -102,33 +67,28 @@ function escapeHtml(s: string): string {
 		.replace(/"/g, "&quot;");
 }
 
-const GRADOS_OPCION = ["1", "2", "3", "4", "5", "6"] as const;
-
 function inicialIncluirColumnas(): Record<ColKey, boolean> {
 	return {
 		nombre: true,
 		carrera: true,
 		matricula: true,
-		telefono: false,
-		tutor: false,
-		curp: false,
 		grado: true,
 		grupo: true,
 	};
 }
 
 export default function CrearTablaOrientador() {
-	const [carreras, setCarreras] = useState<CarreraOpt[]>([]);
-	const [catalogoGrupos, setCatalogoGrupos] = useState<GrupoResumenCatalogo[]>([]);
-	const [catalogosCargando, setCatalogosCargando] = useState(false);
-	const [errorCatalogo, setErrorCatalogo] = useState("");
-
 	const [incluirColumna, setIncluirColumna] = useState<Record<ColKey, boolean>>(inicialIncluirColumnas);
 	const [titulosColumna, setTitulosColumna] = useState<Record<ColKey, string>>(() => ({ ...ETIQUETA_DEFAULT }));
 
-	const [reqGrado, setReqGrado] = useState("");
-	const [reqGrupoDestino, setReqGrupoDestino] = useState("");
-	const [reqCarreraId, setReqCarreraId] = useState("");
+	const [reqCuenta, setReqCuenta] = useState<
+		| "todos"
+		| "con_cuenta"
+		| "sin_cuenta"
+		| "con_documento_rechazado"
+		| "con_documento_aceptado"
+	>("todos");
+	const [reqDocsBase, setReqDocsBase] = useState("");
 
 	const [filas, setFilas] = useState<FilaEditable[]>([]);
 	const [cargando, setCargando] = useState(false);
@@ -139,77 +99,6 @@ export default function CrearTablaOrientador() {
 		[incluirColumna],
 	);
 
-	const gruposParaSelect = useMemo(() => {
-		const gd = reqGrado.trim();
-		const coincideGrado = (x: GrupoResumenCatalogo) => String(x.grado).trim() === gd;
-		let filasG = gd === "" ? [] : catalogoGrupos.filter(coincideGrado);
-		const sel = reqGrupoDestino.trim();
-		if (sel && !filasG.some((x) => idDestinoGrupoCatalogo(x) === sel)) {
-			const actual = catalogoGrupos.find((x) => idDestinoGrupoCatalogo(x) === sel);
-			if (actual) {
-				filasG = [actual, ...filasG];
-			}
-		}
-		const vistos = new Set<string>();
-		return filasG.filter((x) => {
-			const v = idDestinoGrupoCatalogo(x);
-			if (!v || vistos.has(v)) {
-				return false;
-			}
-			vistos.add(v);
-			return true;
-		});
-	}, [catalogoGrupos, reqGrado, reqGrupoDestino]);
-
-	useEffect(() => {
-		let cancel = false;
-		(async () => {
-			setCatalogosCargando(true);
-			setErrorCatalogo("");
-			try {
-				const [resC, resG] = await Promise.all([
-					fetch("/api/orientador/carreras", { credentials: "include" }),
-					fetch("/api/orientador/grupos", { credentials: "include" }),
-				]);
-				const dataC = (await resC.json()) as { carreras?: CarreraOpt[]; error?: string };
-				const dataG = (await resG.json()) as { grupos?: GrupoResumenCatalogo[]; error?: string };
-				if (cancel) {
-					return;
-				}
-				if (!resC.ok) {
-					setErrorCatalogo(dataC.error ?? "No se pudieron cargar carreras");
-				} else {
-					setCarreras(dataC.carreras ?? []);
-				}
-				if (!resG.ok) {
-					setErrorCatalogo((e) => e || (dataG.error ?? "No se pudieron cargar grupos"));
-				} else {
-					const listaG = (dataG.grupos ?? []).filter((g) => idDestinoGrupoCatalogo(g) !== "");
-					listaG.sort((a, b) => {
-						const na = Number.parseInt(String(a.grado), 10) || 0;
-						const nb = Number.parseInt(String(b.grado), 10) || 0;
-						if (na !== nb) {
-							return na - nb;
-						}
-						return String(a.grupo).localeCompare(String(b.grupo), "es");
-					});
-					setCatalogoGrupos(listaG);
-				}
-			} catch {
-				if (!cancel) {
-					setErrorCatalogo("Error de red al cargar catálogos");
-				}
-			} finally {
-				if (!cancel) {
-					setCatalogosCargando(false);
-				}
-			}
-		})();
-		return () => {
-			cancel = true;
-		};
-	}, []);
-
 	useEffect(() => {
 		if (!error.trim()) {
 			return;
@@ -217,14 +106,6 @@ export default function CrearTablaOrientador() {
 		const id = window.setTimeout(() => setError(""), DURACION_MENSAJE_EMERGENTE_MS);
 		return () => window.clearTimeout(id);
 	}, [error]);
-
-	useEffect(() => {
-		if (!errorCatalogo.trim()) {
-			return;
-		}
-		const id = window.setTimeout(() => setErrorCatalogo(""), DURACION_MENSAJE_EMERGENTE_MS);
-		return () => window.clearTimeout(id);
-	}, [errorCatalogo]);
 
 	const toggleColumna = useCallback((key: ColKey) => {
 		setIncluirColumna((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -243,24 +124,6 @@ export default function CrearTablaOrientador() {
 			const p = new URLSearchParams();
 			p.set("estado", "activo");
 
-			const g = reqGrado.trim();
-			if (g !== "") {
-				p.set("grado", g);
-			}
-			const grLetra = (() => {
-				if (reqGrupoDestino.trim() === "") {
-					return "";
-				}
-				const sel = catalogoGrupos.find((x) => idDestinoGrupoCatalogo(x) === reqGrupoDestino.trim());
-				return sel ? String(sel.grupo).trim().toUpperCase() : "";
-			})();
-			if (grLetra !== "") {
-				p.set("grupo", grLetra);
-			}
-			if (reqCarreraId.trim() !== "") {
-				p.set("carreraId", reqCarreraId.trim());
-			}
-
 			const res = await fetch(`/api/orientador/expediente?${p.toString()}`, {
 				credentials: "include",
 			});
@@ -271,7 +134,29 @@ export default function CrearTablaOrientador() {
 				return;
 			}
 			// TODO(BD): mapear telefono, tutor, curp desde la respuesta cuando existan en API / padron.
-			const raw = (data.alumnos ?? []).map((a) => ({
+			const candidatos = (data.alumnos ?? []).filter((a) => {
+				if (reqCuenta === "con_cuenta" && !a.cuentaId) {
+					return false;
+				}
+				if (reqCuenta === "sin_cuenta" && a.cuentaId) {
+					return false;
+				}
+				if (reqCuenta === "con_documento_rechazado" && !a.tieneDocumentoRechazado) {
+					return false;
+				}
+				if (reqCuenta === "con_documento_aceptado" && !a.tieneDocumentoAceptado) {
+					return false;
+				}
+				const docs = Number(a.documentosBaseSubidos ?? 0);
+				if (reqDocsBase.trim() !== "") {
+					const objetivo = Number.parseInt(reqDocsBase, 10);
+					if (!Number.isFinite(objetivo) || docs !== objetivo) {
+						return false;
+					}
+				}
+				return true;
+			});
+			const raw = candidatos.map((a) => ({
 				...filaVacia(),
 				grado: a.grado ?? "",
 				grupo: a.grupo ?? "",
@@ -289,7 +174,7 @@ export default function CrearTablaOrientador() {
 		} finally {
 			setCargando(false);
 		}
-	}, [catalogoGrupos, incluirColumna, reqCarreraId, reqGrado, reqGrupoDestino]);
+	}, [incluirColumna, reqCuenta, reqDocsBase]);
 
 	const actualizarCelda = useCallback((id: string, key: ColKey, valor: string) => {
 		setFilas((prev) => prev.map((f) => (f.id === id ? { ...f, [key]: valor } : f)));
@@ -354,31 +239,28 @@ export default function CrearTablaOrientador() {
 	}, [columnasVisibles, filas, titulosColumna]);
 
 	return (
-		<div className="mx-auto mt-5 max-w-6xl rounded-2xl border border-[#E2E8F0] bg-white p-4 shadow-sm sm:p-6">
+		<div className="mx-auto mt-5 w-full max-w-full rounded-2xl border border-[#E2E8F0] bg-white p-4 shadow-sm sm:p-6">
 			<p className="text-sm leading-relaxed text-[#374151] sm:text-[0.95rem]">
-				Elige qué datos quieres ver marcando las casillas moradas en <strong>Información</strong>. En{" "}
-				<strong>Requisitos</strong> acota el listado con los menús (sin escribir). Luego{" "}
-				<strong className="font-semibold">Buscar</strong>. Teléfono, tutor y CURP tendrán valor desde la base cuando
-				estén conectados; por ahora puedes completarlos en la tabla.
+				A la <strong className="text-[#5B21B6]">izquierda</strong> marcas columnas y filtros; a la{" "}
+				<strong className="text-[#5B21B6]">derecha</strong> ves la tabla, buscas, agregas filas y exportas. Si falta algún
+				dato, edítalo directo en la tabla.
 			</p>
 
-			{errorCatalogo ? (
-				<p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">{errorCatalogo}</p>
-			) : null}
-
-			<div className="mt-6 flex flex-col gap-6 lg:flex-row lg:items-start">
-				<div className="min-w-0 flex-1 space-y-6">
+			<div className="mt-6 grid grid-cols-1 gap-8 lg:grid-cols-[minmax(16rem,20rem)_1fr] lg:items-start xl:grid-cols-[minmax(17.5rem,22rem)_1fr]">
+				<aside className="flex min-w-0 flex-col gap-8 rounded-2xl border border-[#DDD6FE] bg-gradient-to-b from-[#FAF5FF] via-white to-[#F5F3FF] p-4 shadow-sm ring-1 ring-[#EDE9FE]/80 sm:p-5 lg:sticky lg:top-24 lg:self-start">
 					<div>
-						<h3 className="mb-3 text-base font-bold text-[#111827]">Información</h3>
-						<p className="mb-3 text-xs text-[#6B7280]">Marca qué columnas quieres en la tabla y en la exportación.</p>
-						<div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+						<h3 className="mb-1 text-base font-bold tracking-tight text-[#111827]">Información</h3>
+						<p className="mb-3 text-xs leading-snug text-[#6B7280]">
+							Casillas moradas: qué columnas salen en la tabla y en la exportación.
+						</p>
+						<div className="flex flex-col gap-2">
 							{COLUMNAS_INFORMACION.map(({ key, descripcion }) => (
 								<label
 									key={key}
-									className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 px-3 py-3 transition ${
+									className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 px-3 py-2.5 transition ${
 										incluirColumna[key]
 											? "border-[#7C3AED] bg-[#EDE9FE] shadow-sm"
-											: "border-[#E5E7EB] bg-[#FAFAFA] hover:border-[#C4B5FD]"
+											: "border-[#E5E7EB] bg-white/80 hover:border-[#C4B5FD]"
 									}`}
 								>
 									<input
@@ -390,120 +272,104 @@ export default function CrearTablaOrientador() {
 									/>
 									<span className="min-w-0">
 										<span className="block text-sm font-bold text-[#111827]">{ETIQUETA_DEFAULT[key]}</span>
-										<span className="mt-0.5 block text-xs text-[#6B7280]">{descripcion}</span>
+										<span className="mt-0.5 block text-xs leading-snug text-[#6B7280]">{descripcion}</span>
 									</span>
 								</label>
 							))}
 						</div>
 					</div>
 
-					<div>
-						<h3 className="mb-3 text-base font-bold text-[#111827]">Requisitos</h3>
-						<p className="mb-3 text-xs text-[#6B7280]">Solo menús desplegables para acotar la búsqueda.</p>
-						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+					<div className="border-t border-[#E9D5FF] pt-6">
+						<h3 className="mb-1 text-base font-bold tracking-tight text-[#111827]">Requisitos</h3>
+						<p className="mb-3 text-sm font-medium leading-snug text-[#4B5563]">
+							Filtros clave para ver todo sin saturar opciones.
+						</p>
+						<div className="flex flex-col gap-3">
 							<div>
-								<label htmlFor="ct-req-grado" className="mb-1 block text-sm font-medium text-[#374151]">
-									Grado
+								<label htmlFor="ct-req-cuenta" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#6B7280]">
+									Filtro de alumnos
 								</label>
 								<select
-									id="ct-req-grado"
-									value={reqGrado}
+									id="ct-req-cuenta"
+									value={reqCuenta}
 									onChange={(e) => {
-										const next = e.target.value;
-										setReqGrado(next);
-										setReqGrupoDestino("");
-									}}
-									disabled={catalogosCargando}
-									className="w-full rounded-xl border border-[#D1D5DB] bg-[#F9FAFB] px-3 py-2.5 text-sm text-[#111827] shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] outline-none focus:border-[#A78BFA] focus:ring-2 focus:ring-[#EDE9FE] disabled:opacity-60"
-								>
-									<option value="">Todos los grados</option>
-									{GRADOS_OPCION.map((n) => (
-										<option key={n} value={n}>
-											{n}.°
-										</option>
-									))}
-								</select>
-							</div>
-							<div>
-								<label htmlFor="ct-req-grupo" className="mb-1 block text-sm font-medium text-[#374151]">
-									Grupo
-								</label>
-								<select
-									id="ct-req-grupo"
-									value={reqGrupoDestino}
-									onChange={(e) => setReqGrupoDestino(e.target.value)}
-									disabled={catalogosCargando || reqGrado.trim() === "" || gruposParaSelect.length === 0}
-									className="w-full rounded-xl border border-[#D1D5DB] bg-[#F9FAFB] px-3 py-2.5 text-sm text-[#111827] shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] outline-none focus:border-[#A78BFA] focus:ring-2 focus:ring-[#EDE9FE] disabled:opacity-60"
-								>
-									<option value="">
-										{reqGrado.trim() === ""
-											? "— Elige primero el grado —"
-											: "— Cualquier grupo de ese grado —"}
-									</option>
-									{gruposParaSelect.map((g) => {
-										const v = idDestinoGrupoCatalogo(g);
-										return (
-											<option key={v} value={v}>
-												Grupo {g.grupo}
-											</option>
+										setReqCuenta(
+											e.target.value as
+												| "todos"
+												| "con_cuenta"
+												| "sin_cuenta"
+												| "con_documento_rechazado"
+												| "con_documento_aceptado",
 										);
-									})}
+									}}
+									className="w-full rounded-xl border border-[#D1D5DB] bg-white px-3 py-2.5 text-sm text-[#111827] shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] outline-none focus:border-[#A78BFA] focus:ring-2 focus:ring-[#EDE9FE] disabled:opacity-60"
+								>
+									<option value="todos">Todos</option>
+									<option value="con_cuenta">Alumnos con cuenta</option>
+									<option value="sin_cuenta">Alumnos sin cuenta</option>
+									<option value="con_documento_rechazado">Alumnos con documento rechazado</option>
+									<option value="con_documento_aceptado">Alumnos con documento aceptado</option>
 								</select>
+								<p className="mt-1 text-xs text-[#6B7280]">
+									Aqui puedes elegir solo alumnos con documentos rechazados o aceptados.
+								</p>
 							</div>
 							<div>
-								<label htmlFor="ct-req-carrera" className="mb-1 block text-sm font-medium text-[#374151]">
-									Carrera
+								<label htmlFor="ct-req-docs" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#6B7280]">
+									Documentos base subidos
 								</label>
 								<select
-									id="ct-req-carrera"
-									value={reqCarreraId}
-									onChange={(e) => setReqCarreraId(e.target.value)}
-									disabled={catalogosCargando}
-									className="w-full rounded-xl border border-[#D1D5DB] bg-[#F9FAFB] px-3 py-2.5 text-sm text-[#111827] shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] outline-none focus:border-[#A78BFA] focus:ring-2 focus:ring-[#EDE9FE] disabled:opacity-60"
+									id="ct-req-docs"
+									value={reqDocsBase}
+									onChange={(e) => setReqDocsBase(e.target.value)}
+									className="w-full rounded-xl border border-[#D1D5DB] bg-white px-3 py-2.5 text-sm text-[#111827] shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] outline-none focus:border-[#A78BFA] focus:ring-2 focus:ring-[#EDE9FE] disabled:opacity-60"
 								>
-									<option value="">Todas las carreras</option>
-									{carreras.map((c) => (
-										<option key={c.id} value={c.id}>
-											{c.nombre}
-										</option>
-									))}
+									<option value="">Todos (0 a 5)</option>
+									<option value="1">1 documento</option>
+									<option value="2">2 documentos</option>
+									<option value="3">3 documentos</option>
+									<option value="4">4 documentos</option>
+									<option value="5">5 documentos</option>
 								</select>
 							</div>
 						</div>
 					</div>
-				</div>
+				</aside>
 
-				<div className="flex shrink-0 justify-center lg:pt-6">
-					<button
-						type="button"
-						onClick={() => void buscar()}
-						disabled={cargando}
-						className="flex min-h-[6.75rem] w-[8.25rem] flex-col items-center justify-center gap-1.5 rounded-2xl border border-[#6D28D9] bg-[#7C3AED] px-4 py-3.5 text-[#FAFAFA] shadow-md transition hover:bg-[#6D28D9] disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-[7.25rem] sm:w-[9rem] sm:px-5 sm:py-4"
-					>
-						<span className="text-sm font-bold sm:text-base">{cargando ? "Buscando…" : "Buscar"}</span>
-						<svg
-							aria-hidden
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth="2.2"
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							className="h-9 w-9 sm:h-10 sm:w-10"
+				<div className="flex min-w-0 flex-col gap-4">
+					<div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#E5E7EB] bg-[#FAFAFA] px-4 py-3 sm:px-5">
+						<p className="max-w-md text-xs text-[#6B7280] sm:text-sm">
+							Pulsa <span className="font-semibold text-[#5B21B6]">Buscar</span> para llenar la tabla desde el padrón.
+						</p>
+						<button
+							type="button"
+							onClick={() => void buscar()}
+							disabled={cargando}
+							className="flex min-h-[5.5rem] w-[7.5rem] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl border border-[#6D28D9] bg-[#7C3AED] px-3 py-2.5 text-[#FAFAFA] shadow-md transition hover:bg-[#6D28D9] disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-[6rem] sm:w-[8.25rem]"
 						>
-							<circle cx="11" cy="11" r="7" />
-							<path d="M21 21l-4.35-4.35" />
-						</svg>
-					</button>
-				</div>
-			</div>
+							<span className="text-sm font-bold sm:text-base">{cargando ? "Buscando…" : "Buscar"}</span>
+							<svg
+								aria-hidden
+								xmlns="http://www.w3.org/2000/svg"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								strokeWidth="2.2"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								className="h-8 w-8 sm:h-9 sm:w-9"
+							>
+								<circle cx="11" cy="11" r="7" />
+								<path d="M21 21l-4.35-4.35" />
+							</svg>
+						</button>
+					</div>
 
-			{error ? (
-				<p className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
-			) : null}
+					{error ? (
+						<p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+					) : null}
 
-			<div className="mt-8 min-h-[14rem] rounded-xl border border-[#E5E7EB] bg-[#FAFAFA] p-3 sm:p-4">
+					<div className="min-h-[14rem] flex-1 rounded-xl border border-[#E5E7EB] bg-[#FAFAFA] p-3 sm:p-4">
 				{cargando && filas.length === 0 ? (
 					<div className="flex h-[12rem] flex-col items-center justify-center gap-2 text-[#6B7280]">
 						<p className="text-sm font-medium">Buscando alumnos…</p>
@@ -571,9 +437,23 @@ export default function CrearTablaOrientador() {
 											<button
 												type="button"
 												onClick={() => eliminarFila(f.id)}
-												className="rounded-lg border border-[#FCA5A5] bg-red-50 px-2 py-1 text-xs font-medium text-red-800 transition hover:bg-red-100"
+												className="inline-flex items-center justify-center rounded-lg border border-[#FCA5A5] bg-red-50 px-2 py-1 text-xs font-medium text-red-800 transition hover:bg-red-100"
+												aria-label="Quitar fila"
 											>
-												Quitar
+												<svg
+													aria-hidden
+													xmlns="http://www.w3.org/2000/svg"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													strokeWidth="2"
+													className="h-4 w-4"
+												>
+													<path d="M3 6h18" />
+													<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+													<path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+													<path d="M10 11v6M14 11v6" />
+												</svg>
 											</button>
 										</td>
 									</tr>
@@ -582,59 +462,60 @@ export default function CrearTablaOrientador() {
 						</table>
 					</div>
 				)}
-			</div>
+					</div>
 
-			<div className="mt-4 flex flex-wrap gap-3">
-				<button
-					type="button"
-					onClick={agregarFila}
-					className="rounded-xl border border-[#D1D5DB] bg-white px-4 py-2 text-sm font-medium text-[#374151] shadow-sm hover:bg-[#F9FAFB]"
-				>
-					+ Agregar fila
-				</button>
-			</div>
-
-			<div className="mt-6 grid gap-3 sm:grid-cols-2">
-				<button
-					type="button"
-					onClick={descargarExcel}
-					disabled={filas.length === 0 || columnasVisibles.length === 0}
-					className="inline-flex items-center justify-center gap-3 rounded-2xl border border-[#9CA3AF] bg-[#D1D5DB] px-5 py-4 text-base font-bold text-[#111827] transition hover:bg-[#C4C4C4] disabled:cursor-not-allowed disabled:opacity-45"
-				>
-					Descargar en Excel
-					<svg
-						aria-hidden
-						xmlns="http://www.w3.org/2000/svg"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						strokeWidth="2"
-						className="h-7 w-7"
-					>
-						<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-					</svg>
-				</button>
-				<button
-					type="button"
-					onClick={imprimir}
-					disabled={filas.length === 0 || columnasVisibles.length === 0}
-					className="inline-flex items-center justify-center gap-3 rounded-2xl border border-[#9CA3AF] bg-[#D1D5DB] px-5 py-4 text-base font-bold text-[#111827] transition hover:bg-[#C4C4C4] disabled:cursor-not-allowed disabled:opacity-45"
-				>
-					Imprimir
-					<svg
-						aria-hidden
-						xmlns="http://www.w3.org/2000/svg"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						strokeWidth="2"
-						className="h-7 w-7"
-					>
-						<polyline points="6 9 6 2 18 2 18 9" />
-						<path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-						<rect x="6" y="14" width="12" height="8" />
-					</svg>
-				</button>
+					<div className="flex flex-col gap-4">
+						<button
+							type="button"
+							onClick={agregarFila}
+							className="w-fit rounded-xl border border-[#D1D5DB] bg-white px-4 py-2.5 text-sm font-semibold text-[#374151] shadow-sm transition hover:bg-[#F9FAFB]"
+						>
+							+ Agregar fila
+						</button>
+						<div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4">
+							<button
+								type="button"
+								onClick={descargarExcel}
+								disabled={filas.length === 0 || columnasVisibles.length === 0}
+								className="inline-flex min-w-[11rem] items-center justify-center gap-2 rounded-2xl border border-[#7C3AED] bg-[#F3E8FF] px-5 py-3.5 text-sm font-bold text-[#5B21B6] transition hover:border-[#6D28D9] hover:bg-[#E9D5FF] disabled:cursor-not-allowed disabled:opacity-45 sm:min-w-[12rem] sm:text-base"
+							>
+								Descargar en Excel
+								<svg
+									aria-hidden
+									xmlns="http://www.w3.org/2000/svg"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									strokeWidth="2"
+									className="h-6 w-6 shrink-0 sm:h-7 sm:w-7"
+								>
+									<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+								</svg>
+							</button>
+							<button
+								type="button"
+								onClick={imprimir}
+								disabled={filas.length === 0 || columnasVisibles.length === 0}
+								className="inline-flex min-w-[11rem] items-center justify-center gap-2 rounded-2xl border border-[#7C3AED] bg-[#F3E8FF] px-5 py-3.5 text-sm font-bold text-[#5B21B6] transition hover:border-[#6D28D9] hover:bg-[#E9D5FF] disabled:cursor-not-allowed disabled:opacity-45 sm:min-w-[12rem] sm:text-base"
+							>
+								Imprimir
+								<svg
+									aria-hidden
+									xmlns="http://www.w3.org/2000/svg"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									strokeWidth="2"
+									className="h-6 w-6 shrink-0 sm:h-7 sm:w-7"
+								>
+									<polyline points="6 9 6 2 18 2 18 9" />
+									<path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+									<rect x="6" y="14" width="12" height="8" />
+								</svg>
+							</button>
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 	);

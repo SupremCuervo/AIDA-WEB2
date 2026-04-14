@@ -13,15 +13,13 @@ import {
 	nombreArchivoEstandar,
 	type TipoDocumentoClave,
 } from "@/lib/nombre-archivo";
-import {
-	extraerCamposOcrServidor,
-	tramiteOcrDesdeTipoDocumento,
-	type ResultadoExtraccionServidor,
-} from "@/lib/ocr/extract-servidor";
+import { parseCamposOcrDesdeJson } from "@/lib/ocr/campos-ocr-vista";
+import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
+import { MENSAJE_TIPO_ARCHIVO_NO_PERMITIDO } from "@/lib/alumno/subida-documento-mensajes";
 
 export const runtime = "nodejs";
-/** Permite que OCR + subida no corten en 10s (p. ej. Vercel). Ajusta según tu plan. */
+/** Permite que la subida no corte en 10s (p. ej. Vercel). Ajusta según tu plan. */
 export const maxDuration = 120;
 
 const TAMANO_MAX_BYTES = 15 * 1024 * 1024;
@@ -106,6 +104,17 @@ export async function POST(request: Request) {
 		);
 	}
 
+	const extPrevio = extensionDesdeNombre(archivo.name).toLowerCase();
+	const ctPrevio = (archivo.type || "").toLowerCase().trim();
+	const tipoMimePermitido =
+		ctPrevio === "application/pdf" ||
+		ctPrevio === "application/x-pdf" ||
+		/^image\/(png|jpeg|jpg|webp)$/.test(ctPrevio) ||
+		["pdf", "png", "jpg", "jpeg", "webp"].includes(extPrevio);
+	if (!tipoMimePermitido) {
+		return NextResponse.json({ error: MENSAJE_TIPO_ARCHIVO_NO_PERMITIDO }, { status: 400 });
+	}
+
 	const tipo = tipoRaw as TipoDocumentoClave;
 	const ext = extensionDesdeNombre(archivo.name);
 	let nombreTecnico: string;
@@ -116,8 +125,11 @@ export async function POST(request: Request) {
 			ext || "pdf",
 		).nombreCompleto;
 	} catch (e) {
-		const msg = e instanceof Error ? e.message : "Nombre de archivo no válido";
-		return NextResponse.json({ error: msg }, { status: 400 });
+		const msg = mensajeCausaParaUsuario(e);
+		return NextResponse.json(
+			{ error: msg === "Ocurrió un error inesperado." ? "Nombre de archivo no válido" : msg },
+			{ status: 400 },
+		);
 	}
 
 	let bytes: Uint8Array;
@@ -128,6 +140,36 @@ export async function POST(request: Request) {
 		return NextResponse.json({ error: "No se pudo leer el archivo. Prueba otro formato o tamaño." }, { status: 400 });
 	}
 	const contentType = archivo.type || "application/octet-stream";
+
+	const ocrCamposJsonRaw = formData.get("ocrCamposJson");
+	const ocrTramiteRaw = formData.get("ocrTramite");
+	const ocrErrorRaw = formData.get("ocrError");
+
+	const OCR_JSON_MAX_CHARS = 120_000;
+	let ocrCamposParsed: ReturnType<typeof parseCamposOcrDesdeJson> = null;
+	let ocrTramite: string | null = null;
+	if (typeof ocrTramiteRaw === "string" && ocrTramiteRaw.trim() !== "") {
+		ocrTramite = ocrTramiteRaw.trim().slice(0, 64);
+	}
+	let ocrError: string | null = null;
+	if (typeof ocrErrorRaw === "string" && ocrErrorRaw.trim() !== "") {
+		ocrError = ocrErrorRaw.trim().slice(0, 2000);
+	}
+	if (typeof ocrCamposJsonRaw === "string" && ocrCamposJsonRaw.length > 0) {
+		if (ocrCamposJsonRaw.length > OCR_JSON_MAX_CHARS) {
+			return NextResponse.json({ error: "ocrCamposJson demasiado grande" }, { status: 400 });
+		}
+		try {
+			const parsed = JSON.parse(ocrCamposJsonRaw) as unknown;
+			ocrCamposParsed = parseCamposOcrDesdeJson(parsed);
+		} catch {
+			return NextResponse.json({ error: "ocrCamposJson no es JSON válido" }, { status: 400 });
+		}
+		if (!ocrCamposParsed) {
+			ocrError = ocrError ?? "ocr_sin_campos_validos";
+		}
+	}
+	const ocrExtraidoEn = ocrCamposParsed ? new Date().toISOString() : null;
 
 	const estado = ESTADOS_ENTREGA_DOCUMENTO.PENDIENTE_REVISION_MANUAL;
 	const validacionAutomatica = false;
@@ -140,39 +182,16 @@ export async function POST(request: Request) {
 			tipo,
 		);
 
-		const { error: errSubida } = await supabase.storage.from(bucket).upload(nombreTecnico, Buffer.from(bytes), {
-			contentType,
-			upsert: true,
-		});
+		const { error: errSubida } = await supabase.storage
+			.from(bucket)
+			.upload(nombreTecnico, Buffer.from(bytes), {
+				contentType,
+				upsert: true,
+			});
 		if (errSubida) {
 			console.error("subir-documento storage", errSubida);
 			return NextResponse.json({ error: mensajeErrorStorage(errSubida) }, { status: 500 });
 		}
-
-		let ocrRes: ResultadoExtraccionServidor;
-		try {
-			ocrRes = await extraerCamposOcrServidor(
-				Buffer.from(bytes),
-				archivo.name,
-				contentType,
-				tipo,
-			);
-		} catch (ocrEx) {
-			console.error("subir-documento OCR excepción", ocrEx);
-			ocrRes = {
-				ok: false,
-				error:
-					ocrEx instanceof Error
-						? `ocr_error: ${ocrEx.message}`.slice(0, 500)
-						: "ocr_excepcion",
-				tramite: tramiteOcrDesdeTipoDocumento(tipo),
-			};
-		}
-		const ahoraIso = new Date().toISOString();
-		const ocrCampos = ocrRes.ok ? ocrRes.fields : null;
-		const ocrTramite = ocrRes.tramite;
-		const ocrExtraidoEn = ocrRes.ok ? ahoraIso : null;
-		const ocrError = ocrRes.ok ? null : ocrRes.error.slice(0, 500);
 
 		const { error: errDb } = await upsertEntregaDocumento(supabase, {
 			cuentaId: payloadAlumno.cuentaId,
@@ -180,7 +199,7 @@ export async function POST(request: Request) {
 			estado,
 			rutaStorage: nombreTecnico,
 			validacionAutomatica,
-			ocrCampos,
+			ocrCampos: ocrCamposParsed,
 			ocrTramite,
 			ocrExtraidoEn,
 			ocrError,
@@ -201,19 +220,10 @@ export async function POST(request: Request) {
 			nombreTecnico,
 			estado,
 			validacionAutomatica,
-			ocr: {
-				exitoso: ocrRes.ok,
-				campos: ocrCampos,
-				tramite: ocrTramite,
-				error: ocrError,
-			},
 		});
 	} catch (e) {
 		console.error("subir-documento", e);
-		const hint =
-			e instanceof Error && e.message
-				? `Error al subir: ${e.message.slice(0, 200)}`
-				: "Error al subir el archivo. Revisa la consola del servidor.";
+		const hint = `Error al subir: ${mensajeCausaParaUsuario(e)}`.slice(0, 280);
 		return NextResponse.json({ error: hint }, { status: 500 });
 	}
 }

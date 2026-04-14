@@ -22,8 +22,8 @@ function etiquetaNombrePeriodo(row: {
 }
 
 /**
- * Lista los ciclos de semestre (orientador_semestre_fechas): id = periodo para asignar grupos.
- * Ya no se crean periodos con rangos de fecha manuales.
+ * Lista ciclos de semestre globales (aplican a todos los grupos del sistema).
+ * Ya no existe asignación de ciclo por grupo.
  */
 export async function GET() {
 	const orientador = await obtenerPayloadOrientador();
@@ -41,20 +41,9 @@ export async function GET() {
 			return NextResponse.json({ error: "No se pudieron listar los periodos" }, { status: 500 });
 		}
 		const filas = semestres ?? [];
-		const ids = filas.map((r) => r.id as string);
-		let conteos = new Map<string, number>();
-		if (ids.length > 0) {
-			const { data: rels, error: errR } = await supabase
-				.from("periodo_institucion_grupos")
-				.select("periodo_id")
-				.in("periodo_id", ids);
-			if (!errR && rels) {
-				for (const r of rels) {
-					const pid = String(r.periodo_id);
-					conteos.set(pid, (conteos.get(pid) ?? 0) + 1);
-				}
-			}
-		}
+		const { count: totalGrupos } = await supabase
+			.from("institucion_grupos")
+			.select("id", { count: "exact", head: true });
 		const lista = filas.map((p) => ({
 			id: p.id as string,
 			nombrePeriodo: etiquetaNombrePeriodo({
@@ -65,7 +54,7 @@ export async function GET() {
 			primerPeriodoFecha: p.primer_periodo_fecha ?? null,
 			segundoPeriodoFecha: p.segundo_periodo_fecha ?? null,
 			actualizadoEn: p.actualizado_en ?? null,
-			gruposAsignados: conteos.get(String(p.id)) ?? 0,
+			gruposAsignados: totalGrupos ?? 0,
 		}));
 		return NextResponse.json({ periodos: lista });
 	} catch (e) {

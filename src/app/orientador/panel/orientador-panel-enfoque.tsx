@@ -5,22 +5,18 @@ import { createContext, useCallback, useContext, useEffect, useRef, type ReactNo
 export type SeccionOrientadorEnfoque =
 	| "expediente"
 	| "crear_tabla"
-	| "escaner"
 	| "plantillas"
 	| "cargas"
-	| "periodos"
-	| "carreras"
+	| "escolar"
 	| "historial";
 
 /** Anclas `id` en el DOM para desplazar la vista al mensaje relevante. */
 export const ANCLA_SECCION = {
 	expediente: "sec-expediente",
 	crear_tabla: "sec-crear-tabla",
-	escaner: "sec-escaner",
 	plantillas: "sec-plantillas",
 	cargas: "sec-cargas",
-	periodos: "sec-periodos",
-	carreras: "sec-carreras",
+	escolar: "sec-escolar",
 	historial: "sec-historial",
 } as const satisfies Record<SeccionOrientadorEnfoque, string>;
 
@@ -42,7 +38,8 @@ export function runEnfocarSeccion(
 	if (typeof window !== "undefined") {
 		const url = new URL(window.location.href);
 		url.searchParams.set("seccion", seccion);
-		window.history.replaceState(null, "", `${url.pathname}?${url.search}`);
+		// `url.search` ya incluye el `?` inicial; no anteponer otro o la URL queda como …/panel??seccion=…
+		window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 	}
 	const destino = anchorId ?? ANCLA_SECCION[seccion];
 	if (seccionVistaAntes === seccion) {

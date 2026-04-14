@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { mensajeRedAmigable } from "@/lib/mensaje-red-amigable";
 import { jpegsABufferPdf } from "./imagenes-jpeg-a-pdf";
 
 export type ResultadoCapturaEscaner = {
@@ -64,7 +65,7 @@ type Props = {
 	onCrearPdf: (r: ResultadoCapturaEscaner) => void;
 };
 
-export default function ModalCapturaEscaner({ abierto, titulo, esPlantilla, onCerrar, onCrearPdf }: Props) {
+export default function ModalCapturaEscaner({ abierto, titulo, onCerrar, onCrearPdf }: Props) {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const streamActivaRef = useRef<MediaStream | null>(null);
 	const [nombre, setNombre] = useState("");
@@ -75,6 +76,9 @@ export default function ModalCapturaEscaner({ abierto, titulo, esPlantilla, onCe
 	const [preparando, setPreparando] = useState(false);
 	const [creandoPdf, setCreandoPdf] = useState(false);
 	const [error, setError] = useState("");
+	/** Fotograma congelado: primero vista previa, luego el usuario pulsa escanear (prepare + página). */
+	const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+	const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
 	const detenerCamara = useCallback(() => {
 		setStream((prev) => {
@@ -99,6 +103,13 @@ export default function ModalCapturaEscaner({ abierto, titulo, esPlantilla, onCe
 			});
 			setRotacion(0);
 			setError("");
+			setPreviewBlob(null);
+			setPreviewUrl((u) => {
+				if (u) {
+					URL.revokeObjectURL(u);
+				}
+				return null;
+			});
 			return;
 		}
 
@@ -149,13 +160,8 @@ export default function ModalCapturaEscaner({ abierto, titulo, esPlantilla, onCe
 		async (archivoJpeg: Blob): Promise<Blob> => {
 			const form = new FormData();
 			form.append("file", archivoJpeg, "captura.jpg");
-			if (esPlantilla) {
-				form.append("binarizar", "false");
-				form.append("corregir_perspectiva", "false");
-			} else {
-				form.append("binarizar", "true");
-				form.append("corregir_perspectiva", "false");
-			}
+			form.append("binarizar", "false");
+			form.append("aplicar_saturacion_hsv", "true");
 			const res = await fetch("/api/orientador/ocr/prepare", {
 				method: "POST",
 				body: form,
@@ -183,29 +189,60 @@ export default function ModalCapturaEscaner({ abierto, titulo, esPlantilla, onCe
 			}
 			throw new Error(msg);
 		},
-		[esPlantilla],
+		[],
 	);
 
-	const capturar = useCallback(async () => {
+	const limpiarVistaPrevia = useCallback(() => {
+		setPreviewBlob(null);
+		setPreviewUrl((u) => {
+			if (u) {
+				URL.revokeObjectURL(u);
+			}
+			return null;
+		});
+	}, []);
+
+	/** Paso 1: congela el video en una vista previa (sin llamar al servidor). */
+	const tomarVistaPrevia = useCallback(async () => {
 		const video = videoRef.current;
 		if (!video) {
+			return;
+		}
+		setError("");
+		try {
+			const raw = await fotogramaRotado(video, rotacion);
+			setPreviewUrl((prevU) => {
+				if (prevU) {
+					URL.revokeObjectURL(prevU);
+				}
+				return URL.createObjectURL(raw);
+			});
+			setPreviewBlob(raw);
+		} catch (e) {
+			setError(mensajeRedAmigable(e));
+		}
+	}, [rotacion]);
+
+	/** Paso 2: envía la vista previa a prepare y añade la página al PDF. */
+	const escanearPaginaDesdePrevia = useCallback(async () => {
+		if (!previewBlob) {
 			return;
 		}
 		setPreparando(true);
 		setError("");
 		try {
-			const raw = await fotogramaRotado(video, rotacion);
-			const preparada = await llamarPrepare(raw);
+			const preparada = await llamarPrepare(previewBlob);
 			const bytes = await blobAUint8(preparada);
 			const url = URL.createObjectURL(preparada);
 			const id = crypto.randomUUID();
 			setPaginas((prev) => [...prev, { id, url, bytes }]);
+			limpiarVistaPrevia();
 		} catch (e) {
-			setError(e instanceof Error ? e.message : "Error al capturar");
+			setError(mensajeRedAmigable(e));
 		} finally {
 			setPreparando(false);
 		}
-	}, [llamarPrepare, rotacion]);
+	}, [previewBlob, llamarPrepare, limpiarVistaPrevia]);
 
 	const quitarPagina = useCallback((id: string) => {
 		setPaginas((prev) => {
@@ -246,8 +283,8 @@ export default function ModalCapturaEscaner({ abierto, titulo, esPlantilla, onCe
 		try {
 			const jpegs = paginas.map((p) => p.bytes);
 			const pdfBytes = await jpegsABufferPdf(jpegs);
-			const pdfBlob = new Blob([pdfBytes], { type: "application/pdf" });
-			const primera = new Blob([paginas[0].bytes], { type: "image/jpeg" });
+			const pdfBlob = new Blob([new Uint8Array(pdfBytes)], { type: "application/pdf" });
+			const primera = new Blob([new Uint8Array(paginas[0].bytes)], { type: "image/jpeg" });
 			onCrearPdf({ nombre: n, pdfBlob, primeraPaginaJpeg: primera });
 		} catch {
 			setError("No se pudo generar el PDF.");
@@ -309,54 +346,94 @@ export default function ModalCapturaEscaner({ abierto, titulo, esPlantilla, onCe
 
 				<div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto px-4 pb-3 md:grid-cols-2 md:gap-4">
 					<div className="flex min-h-[220px] flex-col rounded-xl border border-slate-200 bg-slate-50">
+						<p className="border-b border-slate-100 px-2 py-1.5 text-center text-[11px] text-slate-500">
+							{previewUrl
+								? "Revisa la imagen. Pulsa «Escanear página» para procesarla o «Otra toma» para volver a la cámara."
+								: "Encuadra el documento y pulsa el botón violeta para ver la vista previa."}
+						</p>
 						<div className="relative flex flex-1 items-center justify-center overflow-hidden rounded-t-xl bg-black/5">
-							<video ref={videoRef} autoPlay playsInline muted className="max-h-[min(50vh,360px)] w-full object-contain" />
+							{previewUrl ? (
+								<img
+									src={previewUrl}
+									alt="Vista previa antes de escanear"
+									className="max-h-[min(50vh,360px)] w-full object-contain"
+								/>
+							) : (
+								<video
+									ref={videoRef}
+									autoPlay
+									playsInline
+									muted
+									className="max-h-[min(50vh,360px)] w-full object-contain transition-transform duration-200"
+									style={{ transform: `rotate(${rotacion}deg)` }}
+								/>
+							)}
 						</div>
-						<div className="flex items-center justify-center gap-4 py-3">
-							<button
-								type="button"
-								onClick={() => setFacingMode((m) => (m === "environment" ? "user" : "environment"))}
-								className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
-								title="Cambiar cámara"
-								aria-label="Cambiar cámara"
-							>
-								<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path
-										strokeLinecap="round"
-										strokeLinejoin="round"
-										strokeWidth={2}
-										d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
-									/>
-									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-								</svg>
-							</button>
-							<button
-								type="button"
-								onClick={() => void capturar()}
-								disabled={preparando}
-								className="flex h-14 w-14 items-center justify-center rounded-full border-4 border-violet-600 bg-white shadow-md transition hover:bg-violet-50 disabled:opacity-50"
-								title="Capturar"
-								aria-label="Capturar foto"
-							>
-								<span className="h-8 w-8 rounded-full bg-violet-600" />
-							</button>
-							<button
-								type="button"
-								onClick={() => setRotacion((r) => (r + 90) % 360)}
-								className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
-								title="Rotar vista"
-								aria-label="Rotar"
-							>
-								<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path
-										strokeLinecap="round"
-										strokeLinejoin="round"
-										strokeWidth={2}
-										d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-									/>
-								</svg>
-							</button>
-						</div>
+						{previewUrl ? (
+							<div className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:justify-center">
+								<button
+									type="button"
+									onClick={() => limpiarVistaPrevia()}
+									disabled={preparando}
+									className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+								>
+									Otra toma
+								</button>
+								<button
+									type="button"
+									onClick={() => void escanearPaginaDesdePrevia()}
+									disabled={preparando}
+									className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:bg-violet-700 disabled:opacity-50"
+								>
+									{preparando ? "Procesando…" : "Escanear página"}
+								</button>
+							</div>
+						) : (
+							<div className="flex items-center justify-center gap-4 py-3">
+								<button
+									type="button"
+									onClick={() => setFacingMode((m) => (m === "environment" ? "user" : "environment"))}
+									className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
+									title="Cambiar cámara"
+									aria-label="Cambiar cámara"
+								>
+									<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path
+											strokeLinecap="round"
+											strokeLinejoin="round"
+											strokeWidth={2}
+											d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
+										/>
+										<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+									</svg>
+								</button>
+								<button
+									type="button"
+									onClick={() => void tomarVistaPrevia()}
+									className="flex h-14 w-14 items-center justify-center rounded-full border-4 border-violet-600 bg-white shadow-md transition hover:bg-violet-50"
+									title="Ver vista previa"
+									aria-label="Vista previa del encuadre"
+								>
+									<span className="h-8 w-8 rounded-full bg-violet-600" />
+								</button>
+								<button
+									type="button"
+									onClick={() => setRotacion((r) => (r + 90) % 360)}
+									className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
+									title="Rotar vista"
+									aria-label="Rotar"
+								>
+									<svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path
+											strokeLinecap="round"
+											strokeLinejoin="round"
+											strokeWidth={2}
+											d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+										/>
+									</svg>
+								</button>
+							</div>
+						)}
 					</div>
 
 					<div className="rounded-xl border border-slate-200 bg-white p-2">
@@ -406,7 +483,7 @@ export default function ModalCapturaEscaner({ abierto, titulo, esPlantilla, onCe
 					<p className="px-4 pb-2 text-center text-sm text-red-600">{error}</p>
 				) : null}
 				{preparando ? (
-					<p className="px-4 pb-2 text-center text-xs text-slate-500">Preparando imagen con el servicio OCR…</p>
+					<p className="px-4 pb-2 text-center text-xs text-slate-500">Enviando la vista previa al servicio OCR (prepare)…</p>
 				) : null}
 
 				<div className="shrink-0 border-t border-slate-100 p-4">

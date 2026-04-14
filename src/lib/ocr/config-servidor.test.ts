@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+/** `process.env.NODE_ENV` es de solo lectura en los tipos de Node; en tests asignamos vía registro. */
+const envTest = process.env as Record<string, string | undefined>;
+
 function setOrDelete(key: string, val: string | undefined) {
 	if (val === undefined) {
-		delete process.env[key];
+		delete envTest[key];
 	} else {
-		process.env[key] = val;
+		envTest[key] = val;
 	}
 }
 
@@ -24,11 +27,11 @@ describe("config-servidor OCR (base para OCR sin servicio)", () => {
 		vi.resetModules();
 	});
 
-	it("timeoutMsOcrServidor usa 90000 si variable inválida", async () => {
+	it("timeoutMsOcrServidor usa el default si variable inválida", async () => {
 		process.env.AIDA_OCR_TIMEOUT_MS = "no_es_numero";
 		vi.resetModules();
 		const { timeoutMsOcrServidor } = await import("./config-servidor");
-		expect(timeoutMsOcrServidor()).toBe(90_000);
+		expect(timeoutMsOcrServidor()).toBe(240_000);
 	});
 
 	it("timeoutMsOcrServidor respeta milisegundos válidos (> 5000)", async () => {
@@ -48,7 +51,7 @@ describe("config-servidor OCR (base para OCR sin servicio)", () => {
 	it("sin URL ni demo: resolver devuelve null (producción sin OCR)", async () => {
 		delete process.env.AIDA_OCR_API_BASE_URL;
 		delete process.env.AIDA_OCR_USE_RENDER_DEMO;
-		process.env.NODE_ENV = "production";
+		envTest.NODE_ENV = "production";
 		vi.resetModules();
 		const { resolverBaseUrlOcrServidor } = await import("./config-servidor");
 		expect(resolverBaseUrlOcrServidor()).toBeNull();

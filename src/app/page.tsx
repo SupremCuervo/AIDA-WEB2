@@ -20,24 +20,6 @@ export default function HomePage() {
 
 			<div className="grid w-full max-w-4xl gap-8 sm:grid-cols-2">
 				<Link
-					href="/alumno"
-					className="group flex min-h-[min(100%,22rem)] flex-col items-center justify-center gap-6 rounded-3xl border-2 border-slate-200 bg-white p-10 shadow-sm transition hover:border-sky-400 hover:shadow-lg sm:min-h-[24rem] sm:p-12"
-				>
-					<div className="relative h-48 w-48 overflow-hidden rounded-2xl border-2 border-slate-200 ring-2 ring-transparent transition group-hover:border-sky-300 group-hover:ring-sky-100 sm:h-56 sm:w-56">
-						<Image
-							src="/imagenes/Inicio/alumno.png"
-							alt="Alumno"
-							fill
-							className="object-cover"
-							sizes="(max-width: 640px) 192px, 224px"
-						/>
-					</div>
-					<span className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-						Alumno
-					</span>
-				</Link>
-
-				<Link
 					href="/orientador"
 					className="group flex min-h-[min(100%,22rem)] flex-col items-center justify-center gap-6 rounded-3xl border-2 border-slate-200 bg-white p-10 shadow-sm transition hover:border-violet-400 hover:shadow-lg sm:min-h-[24rem] sm:p-12"
 				>
@@ -52,6 +34,24 @@ export default function HomePage() {
 					</div>
 					<span className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
 						Orientador
+					</span>
+				</Link>
+
+				<Link
+					href="/alumno"
+					className="group flex min-h-[min(100%,22rem)] flex-col items-center justify-center gap-6 rounded-3xl border-2 border-slate-200 bg-white p-10 shadow-sm transition hover:border-sky-400 hover:shadow-lg sm:min-h-[24rem] sm:p-12"
+				>
+					<div className="relative h-48 w-48 overflow-hidden rounded-2xl border-2 border-slate-200 ring-2 ring-transparent transition group-hover:border-sky-300 group-hover:ring-sky-100 sm:h-56 sm:w-56">
+						<Image
+							src="/imagenes/Inicio/alu.png"
+							alt="Alumno"
+							fill
+							className="object-cover"
+							sizes="(max-width: 640px) 192px, 224px"
+						/>
+					</div>
+					<span className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+						Alumno
 					</span>
 				</Link>
 			</div>

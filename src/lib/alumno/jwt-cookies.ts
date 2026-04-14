@@ -102,17 +102,25 @@ export async function verificarTokenAlumno(token: string): Promise<PayloadAlumno
 	return { cuentaId, padronId, nombreCompleto, grupo, grado };
 }
 
+export type RolPanelOrientador = "normal" | "jefe";
+
 export type PayloadOrientador = {
 	orientadorId: string;
 	email: string;
 	nombre: string;
+	rolPanel: RolPanelOrientador;
 };
+
+export function orientadorEsJefe(p: PayloadOrientador): boolean {
+	return p.rolPanel === "jefe";
+}
 
 export async function firmarTokenOrientador(payload: PayloadOrientador): Promise<string> {
 	return new SignJWT({
 		orientadorId: payload.orientadorId,
 		email: payload.email,
 		nombre: payload.nombre,
+		rolPanel: payload.rolPanel,
 	})
 		.setProtectedHeader({ alg: ALG })
 		.setIssuedAt()
@@ -126,6 +134,9 @@ export async function verificarTokenOrientador(token: string): Promise<PayloadOr
 	const orientadorId = p.orientadorId;
 	const email = p.email;
 	const nombre = p.nombre;
+	const rolRaw = p.rolPanel;
+	const rolPanel: RolPanelOrientador =
+		rolRaw === "normal" || rolRaw === "jefe" ? rolRaw : "jefe";
 	if (
 		typeof orientadorId !== "string" ||
 		typeof email !== "string" ||
@@ -133,5 +144,5 @@ export async function verificarTokenOrientador(token: string): Promise<PayloadOr
 	) {
 		throw new Error("Token de orientador inválido");
 	}
-	return { orientadorId, email, nombre };
+	return { orientadorId, email, nombre, rolPanel };
 }

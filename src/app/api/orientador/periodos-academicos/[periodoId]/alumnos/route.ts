@@ -28,6 +28,14 @@ export async function GET(
 	}
 	try {
 		const supabase = obtenerClienteSupabaseAdmin();
+		const { data: periodo, error: errPeriodo } = await supabase
+			.from("orientador_semestre_fechas")
+			.select("id")
+			.eq("id", periodoId)
+			.maybeSingle();
+		if (errPeriodo || !periodo) {
+			return NextResponse.json({ error: "Periodo no encontrado" }, { status: 404 });
+		}
 
 		let igId = institucionGrupoIdParam;
 		if (!igId && grupoTokenIdParam) {
@@ -40,19 +48,6 @@ export async function GET(
 				return NextResponse.json({ error: "Grupo (token) no encontrado" }, { status: 404 });
 			}
 			igId = String(gt.institucion_grupo_id);
-		}
-
-		const { data: asignado, error: errA } = await supabase
-			.from("periodo_institucion_grupos")
-			.select("institucion_grupo_id")
-			.eq("periodo_id", periodoId)
-			.eq("institucion_grupo_id", igId)
-			.maybeSingle();
-		if (errA || !asignado) {
-			return NextResponse.json(
-				{ error: "Este grupo no está asignado a ese periodo" },
-				{ status: 403 },
-			);
 		}
 
 		const { data: igRow, error: errIg } = await supabase

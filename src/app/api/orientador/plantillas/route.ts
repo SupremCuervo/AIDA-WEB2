@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { obtenerBucketPlantillas } from "@/lib/orientador/plantillas-bucket";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
+import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
 
 export const runtime = "nodejs";
@@ -31,7 +32,7 @@ function mensajeErrorSubida(e: unknown): string {
 	if (esErrorRedIntermitente(e)) {
 		return "La conexión con el almacenamiento se cortó (red intermitente o Supabase ocupado). Vuelve a intentar en unos segundos.";
 	}
-	return e instanceof Error ? e.message : "Error del servidor";
+	return mensajeCausaParaUsuario(e);
 }
 
 type ClienteSupabase = ReturnType<typeof obtenerClienteSupabaseAdmin>;

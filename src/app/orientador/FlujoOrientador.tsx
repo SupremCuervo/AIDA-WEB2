@@ -11,11 +11,13 @@ export default function FlujoOrientador() {
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [error, setError] = useState("");
+	const [ok, setOk] = useState("");
 	const [cargando, setCargando] = useState(false);
 
 	async function enviar(e: React.FormEvent) {
 		e.preventDefault();
 		setError("");
+		setOk("");
 		setCargando(true);
 		try {
 			const res = await fetch("/api/orientador/acceso", {
@@ -24,7 +26,11 @@ export default function FlujoOrientador() {
 				credentials: "include",
 				body: JSON.stringify({ email: email.trim(), password }),
 			});
-			const data = (await res.json()) as { error?: string };
+			const data = (await res.json()) as { error?: string; solicitudEnviada?: boolean; mensaje?: string };
+			if (res.status === 202 && data.solicitudEnviada) {
+				setOk(data.mensaje ?? "Solicitud enviada. Espera aprobación.");
+				return;
+			}
 			if (!res.ok) {
 				setError(data.error ?? "No se pudo iniciar sesión");
 				return;
@@ -44,6 +50,7 @@ export default function FlujoOrientador() {
 					href="/"
 					className="inline-flex items-center gap-2.5 rounded-full border border-[#DBEAFE] bg-white/80 px-4 py-2 text-base font-semibold text-[#1D4ED8] shadow-sm transition hover:border-[#BFDBFE] hover:bg-white hover:text-[#1E40AF] sm:text-lg"
 				>
+					<span aria-hidden>←</span>
 					<span>Volver al inicio</span>
 				</Link>
 
@@ -66,46 +73,66 @@ export default function FlujoOrientador() {
 							</div>
 						</div>
 
-						<form onSubmit={enviar} className="relative z-[2] -mt-2 space-y-4 px-6 pb-6 pt-2 sm:-mt-3 sm:px-8 sm:pb-6 sm:pt-3">
-							<div>
-							<label htmlFor="ori-email" className="mb-1.5 flex items-center gap-2 text-base font-bold text-[#1E293B] sm:text-lg">
-									<span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#EFF6FF] text-[#2563EB]">
-										<IconoCorreo className="h-4 w-4" />
-									</span>
-									Correo electrónico
-								</label>
-								<input
-									id="ori-email"
-									type="email"
-									autoComplete="email"
-									className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-[#1E293B] outline-none placeholder:text-[#94A3B8] focus:border-[#2563EB] focus:ring-2 focus:ring-[#DBEAFE]"
-									value={email}
-									onChange={(ev) => setEmail(ev.target.value)}
-									disabled={cargando}
-									required
-								/>
-							</div>
-							<div>
-							<label htmlFor="ori-pass" className="mb-1.5 flex items-center gap-2 text-base font-bold text-[#1E293B] sm:text-lg">
-									<span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#F5F3FF] text-[#7C3AED]">
-										<IconoCandado className="h-4 w-4" />
-									</span>
-									Contraseña
-								</label>
-								<input
-									id="ori-pass"
-									type="password"
-									autoComplete="current-password"
-									className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-[#1E293B] outline-none placeholder:text-[#94A3B8] focus:border-[#7C3AED] focus:ring-2 focus:ring-[#EDE9FE]"
-									value={password}
-									onChange={(ev) => setPassword(ev.target.value)}
-									disabled={cargando}
-									required
-								/>
-							</div>
+						<form
+							onSubmit={enviar}
+							className="relative z-[2] -mt-2 space-y-4 px-6 pb-6 pt-2 sm:-mt-3 sm:px-8 sm:pb-6 sm:pt-3"
+						>
+              <div>
+                <label
+                  htmlFor="ori-email"
+                  className="mb-1.5 flex items-center gap-2 text-base font-bold text-[#1E293B] sm:text-lg"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#EFF6FF] text-[#2563EB]">
+                    <IconoCorreo className="h-4 w-4" />
+                  </span>
+                  Correo electrónico
+                </label>
+                <input
+                  id="ori-email"
+                  type="email"
+                  autoComplete="email"
+                  className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-[#1E293B] outline-none placeholder:text-[#94A3B8] focus:border-[#2563EB] focus:ring-2 focus:ring-[#DBEAFE]"
+                  value={email}
+                  onChange={(ev) => setEmail(ev.target.value)}
+                  disabled={cargando}
+                  required
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="ori-pass"
+                  className="mb-1.5 flex items-center gap-2 text-base font-bold text-[#1E293B] sm:text-lg"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#F5F3FF] text-[#7C3AED]">
+                    <IconoCandado className="h-4 w-4" />
+                  </span>
+                  Contraseña
+                </label>
+                <input
+                  id="ori-pass"
+                  type="password"
+                  autoComplete="current-password"
+                  className="w-full rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-[#1E293B] outline-none placeholder:text-[#94A3B8] focus:border-[#7C3AED] focus:ring-2 focus:ring-[#EDE9FE]"
+                  value={password}
+                  onChange={(ev) => setPassword(ev.target.value)}
+                  disabled={cargando}
+                  required
+                />
+              </div>
 							{error ? (
-								<p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600" role="alert">
+								<p
+									className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600"
+									role="alert"
+								>
 									{error}
+								</p>
+							) : null}
+							{ok ? (
+								<p
+									className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
+									role="status"
+								>
+									{ok}
 								</p>
 							) : null}
 							<button
@@ -113,7 +140,7 @@ export default function FlujoOrientador() {
 								disabled={cargando}
 								className="w-full rounded-xl bg-gradient-to-r from-[#2563EB] to-[#4F46E5] py-3 font-semibold text-white shadow-md shadow-[#2563EB]/20 transition hover:from-[#1D4ED8] hover:to-[#4338CA] disabled:opacity-50"
 							>
-								{cargando ? "Entrando…" : "Entrar al panel"}
+								{cargando ? "Enviando…" : "Iniciar o enviar solicitud"}
 							</button>
 						</form>
 					</div>

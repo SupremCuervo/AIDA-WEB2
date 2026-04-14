@@ -7,6 +7,8 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import {
 	CLAVES_DATO_ALUMNO,
 	etiquetaClave,
+	PLANTILLA_FUENTE_FAMILIA_CSS,
+	PLANTILLA_FUENTE_PT_DEFECTO,
 	type CampoPlantillaRelleno,
 	type ClaveDatoAlumno,
 } from "@/lib/orientador/plantilla-definicion-relleno";
@@ -29,6 +31,8 @@ export type AnotacionUi = {
 	text: string;
 	colorHex: string;
 	fondo: boolean;
+	/** Mismo tamaño que en el PDF (Helvetica); coincide con exportarPdfConAnotaciones. */
+	fontSizePt: number;
 };
 
 function PaginaPdf({
@@ -69,32 +73,41 @@ function PaginaPdf({
 	const [previewPos, setPreviewPos] = useState<{ xPct: number; yPct: number } | null>(null);
 
 	useEffect(() => {
-		let cancel = false;
+		let cancelled = false;
+		let renderTask: { cancel: () => void; promise: Promise<void> } | null = null;
 		const canvas = canvasRef.current;
 		if (!canvas) {
 			return;
 		}
 		(async () => {
-			const page = await pdf.getPage(pageIndex + 1);
-			if (cancel) {
-				return;
+			try {
+				const page = await pdf.getPage(pageIndex + 1);
+				if (cancelled) {
+					return;
+				}
+				const ctx = canvas.getContext("2d");
+				if (!ctx) {
+					return;
+				}
+				const scale = 1.35;
+				const viewport = page.getViewport({ scale });
+				canvas.width = viewport.width;
+				canvas.height = viewport.height;
+				if (cancelled) {
+					return;
+				}
+				renderTask = page.render({
+					canvasContext: ctx,
+					viewport,
+				});
+				await renderTask.promise;
+			} catch {
+				/* render cancelado o canvas liberado */
 			}
-			const ctx = canvas.getContext("2d");
-			if (!ctx) {
-				return;
-			}
-			const scale = 1.35;
-			const viewport = page.getViewport({ scale });
-			canvas.width = viewport.width;
-			canvas.height = viewport.height;
-			const renderTask = page.render({
-				canvasContext: ctx,
-				viewport,
-			});
-			await renderTask.promise;
 		})();
 		return () => {
-			cancel = true;
+			cancelled = true;
+			renderTask?.cancel();
 		};
 	}, [pdf, pageIndex]);
 
@@ -228,64 +241,78 @@ function PaginaPdf({
 						))
 					: null}
 				{modoEditor === "anotaciones"
-					? deEstaPagina.map((a) => (
-					<div
-						key={a.id}
-						data-anotacion
-						className={`absolute z-[3] max-w-[min(90%,18rem)] min-w-[6rem] rounded border p-1 shadow-sm ${
-							seleccionadaId === a.id ? "ring-2 ring-sky-500" : "ring-0"
-						} ${modoColocar ? "pointer-events-none" : "pointer-events-auto"}`}
-						style={{
-							left: `${a.xPct}%`,
-							top: `${a.yPct}%`,
-							transform: "translate(-2px, -2px)",
-							backgroundColor: a.fondo ? "rgba(255,255,255,0.95)" : "transparent",
-							borderColor: a.fondo ? "rgb(203 213 225)" : "transparent",
-							color: a.colorHex,
-						}}
-						onClick={(ev) => {
-							ev.stopPropagation();
-							onSelect(a.id);
-						}}
-					>
-						{!modoColocar ? (
-							<div
-								className="-mx-0.5 -mt-0.5 mb-1 flex cursor-grab items-center gap-1 rounded-t border-b border-slate-200/90 bg-slate-100/95 px-1 py-0.5 active:cursor-grabbing"
-								title="Arrastrar para mover el cuadro"
-								onPointerDown={(ev) => iniciarArrastreAnotacion(a, ev)}
-							>
-								<span className="select-none text-[10px] text-slate-500" aria-hidden>
-									⋮⋮
-								</span>
-								<span className="select-none text-[9px] font-medium text-slate-600">Mover</span>
-							</div>
-						) : null}
-						<textarea
-							value={a.text}
-							onChange={(ev) => onChangeTexto(a.id, ev.target.value)}
-							rows={3}
-							className="w-full resize-y bg-transparent text-sm outline-none placeholder:text-slate-400"
-							style={{ color: a.colorHex }}
-							placeholder="Escribe aquí…"
-							onClick={(ev) => {
-								ev.stopPropagation();
-								onSelect(a.id);
-							}}
-						/>
-						{seleccionadaId === a.id ? (
-							<button
-								type="button"
-								className="mt-0.5 text-[10px] font-medium text-red-600 hover:underline"
-								onClick={(ev) => {
-									ev.stopPropagation();
-									onEliminar(a.id);
-								}}
-							>
-								Quitar cuadro
-							</button>
-						) : null}
-					</div>
-				))
+					? deEstaPagina.map((a) => {
+							const fs = Math.max(6, Math.min(a.fontSizePt ?? PLANTILLA_FUENTE_PT_DEFECTO, 48));
+							return (
+								<div
+									key={a.id}
+									data-anotacion
+									className={`absolute z-[3] inline-block max-w-[min(90%,18rem)] min-w-[6rem] rounded border shadow-sm ${
+										seleccionadaId === a.id ? "ring-2 ring-sky-500" : "ring-0"
+									} ${modoColocar ? "pointer-events-none" : "pointer-events-auto"} ${
+										a.fondo ? "border-slate-300 bg-white/95" : "border-transparent"
+									}`}
+									style={{
+										left: `${a.xPct}%`,
+										top: `${a.yPct}%`,
+										transform: "translate(-2px, -2px)",
+									}}
+									onClick={(ev) => {
+										ev.stopPropagation();
+										onSelect(a.id);
+									}}
+								>
+									<div className="relative">
+										{!modoColocar ? (
+											<button
+												type="button"
+												className="absolute right-full top-0 mr-0.5 flex w-5 shrink-0 cursor-grab items-center justify-center rounded border border-slate-200 bg-slate-100/95 text-slate-500 active:cursor-grabbing"
+												title="Arrastrar"
+												aria-label="Arrastrar anotación"
+												style={{
+													fontSize: `${Math.max(9, fs * 0.85)}px`,
+													height: `${fs * 1.25}px`,
+												}}
+												onPointerDown={(ev) => iniciarArrastreAnotacion(a, ev)}
+											>
+												<span className="select-none leading-none" aria-hidden>
+													⋮⋮
+												</span>
+											</button>
+										) : null}
+										<textarea
+											value={a.text}
+											onChange={(ev) => onChangeTexto(a.id, ev.target.value)}
+											rows={3}
+											className="w-full min-w-[6rem] resize-y border-0 bg-transparent px-0.5 py-0 outline-none placeholder:text-slate-400"
+											style={{
+												color: a.colorHex,
+												fontSize: `${fs}px`,
+												lineHeight: 1.25,
+												fontFamily: PLANTILLA_FUENTE_FAMILIA_CSS,
+											}}
+											placeholder="Escribe aquí…"
+											onClick={(ev) => {
+												ev.stopPropagation();
+												onSelect(a.id);
+											}}
+										/>
+										{seleccionadaId === a.id ? (
+											<button
+												type="button"
+												className="mt-0.5 text-[10px] font-medium text-red-600 hover:underline"
+												onClick={(ev) => {
+													ev.stopPropagation();
+													onEliminar(a.id);
+												}}
+											>
+												Quitar cuadro
+											</button>
+										) : null}
+									</div>
+								</div>
+							);
+						})
 					: null}
 			</div>
 		</div>
@@ -425,6 +452,7 @@ export default function EditorPlantillaCliente() {
 				text: "",
 				colorHex: COLORES[colorActual],
 				fondo: fondoActual,
+				fontSizePt: PLANTILLA_FUENTE_PT_DEFECTO,
 			};
 			setAnotaciones((prev) => [...prev, nueva]);
 			setSeleccionadaId(id);
@@ -443,7 +471,7 @@ export default function EditorPlantillaCliente() {
 			pageIndex,
 			xPct,
 			yPct,
-			fontSizePt: 11,
+			fontSizePt: PLANTILLA_FUENTE_PT_DEFECTO,
 			clave: "nombre_completo",
 		};
 		setCamposRelleno((prev) => [...prev, nuevo]);
@@ -561,6 +589,7 @@ export default function EditorPlantillaCliente() {
 					text: a.text,
 					colorHex: a.colorHex,
 					fondo: a.fondo,
+					fontSizePt: a.fontSizePt ?? PLANTILLA_FUENTE_PT_DEFECTO,
 				})),
 			);
 			const blob = new Blob([out], { type: "application/pdf" });
@@ -825,7 +854,10 @@ export default function EditorPlantillaCliente() {
 									type="number"
 									min={6}
 									max={48}
-									value={camposRelleno.find((c) => c.id === seleccionadaCampoId)?.fontSizePt ?? 11}
+									value={
+										camposRelleno.find((c) => c.id === seleccionadaCampoId)?.fontSizePt ??
+										PLANTILLA_FUENTE_PT_DEFECTO
+									}
 									onChange={(e) => {
 										const n = Number.parseInt(e.target.value, 10);
 										if (!Number.isFinite(n)) {
@@ -867,6 +899,35 @@ export default function EditorPlantillaCliente() {
 								))}
 							</div>
 						</div>
+
+						{seleccionadaId && modoEditor === "anotaciones" ? (
+							<div className="border-t border-slate-100 pt-3">
+								<label htmlFor="tam-anotacion" className="mb-1 block text-center text-[10px] font-medium text-slate-600">
+									Tamaño fuente anotación (pt) — igual que en PDF
+								</label>
+								<input
+									id="tam-anotacion"
+									type="number"
+									min={6}
+									max={48}
+									value={
+										anotaciones.find((x) => x.id === seleccionadaId)?.fontSizePt ??
+										PLANTILLA_FUENTE_PT_DEFECTO
+									}
+									onChange={(e) => {
+										const n = Number.parseInt(e.target.value, 10);
+										if (!Number.isFinite(n)) {
+											return;
+										}
+										const v = Math.min(48, Math.max(6, n));
+										setAnotaciones((prev) =>
+											prev.map((x) => (x.id === seleccionadaId ? { ...x, fontSizePt: v } : x)),
+										);
+									}}
+									className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+								/>
+							</div>
+						) : null}
 
 						<div
 							className={`border-t border-slate-100 pt-3 ${modoEditor === "anotaciones" ? "" : "opacity-40"}`}

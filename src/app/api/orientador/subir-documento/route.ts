@@ -9,11 +9,18 @@ import {
 	nombreArchivoEstandar,
 	type TipoDocumentoClave,
 } from "@/lib/nombre-archivo";
+import {
+	bufferImagenJpegPngAPdf,
+	esImagenConvertibleApdf,
+} from "@/lib/archivos/imagen-a-pdf-buffer";
+import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import { extraerCamposOcrServidor } from "@/lib/ocr/extract-servidor";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
 
 export const runtime = "nodejs";
+/** OCR en servidor puede acercarse a `timeoutMsOcrServidor()` (p. ej. 240 s). */
+export const maxDuration = 300;
 
 const TAMANO_MAX_BYTES = 15 * 1024 * 1024;
 
@@ -87,19 +94,46 @@ export async function POST(request: Request) {
 			return NextResponse.json({ error: "No se pudo resolver el nombre del padrón" }, { status: 500 });
 		}
 
-		const ext = extensionDesdeNombre(archivo.name);
-		let nombreTecnico: string;
+		let bytes: Uint8Array;
 		try {
-			nombreTecnico = nombreArchivoEstandar(nombreCompleto, tipo, ext || "pdf").nombreCompleto;
+			bytes = new Uint8Array(await archivo.arrayBuffer());
 		} catch (e) {
-			const msg = e instanceof Error ? e.message : "Nombre inválido";
-			return NextResponse.json({ error: msg }, { status: 400 });
+			console.error("orientador subir lectura archivo", e);
+			return NextResponse.json({ error: "No se pudo leer el archivo" }, { status: 400 });
 		}
 
-		const bytes = new Uint8Array(await archivo.arrayBuffer());
-		const contentType = archivo.type || "application/octet-stream";
+		let uploadBuf = Buffer.from(bytes);
+		let contentType = archivo.type || "application/octet-stream";
+		let extFinal = extensionDesdeNombre(archivo.name);
+		let nombreParaOcr = archivo.name;
+		if (esImagenConvertibleApdf(contentType)) {
+			try {
+				const pdfBytes = await bufferImagenJpegPngAPdf(uploadBuf, contentType);
+				uploadBuf = Buffer.from(pdfBytes);
+				contentType = "application/pdf";
+				extFinal = "pdf";
+				nombreParaOcr = archivo.name.replace(/\.[^.]+$/i, "") + ".pdf";
+			} catch (e) {
+				console.error("orientador subir imagen a pdf", e);
+				return NextResponse.json(
+					{ error: "No se pudo convertir la imagen a PDF. Usa JPG o PNG." },
+					{ status: 400 },
+				);
+			}
+		}
 
-		const ocrRes = await extraerCamposOcrServidor(Buffer.from(bytes), archivo.name, contentType, tipo);
+		let nombreTecnico: string;
+		try {
+			nombreTecnico = nombreArchivoEstandar(nombreCompleto, tipo, extFinal || "pdf").nombreCompleto;
+		} catch (e) {
+			const msg = mensajeCausaParaUsuario(e);
+			return NextResponse.json(
+				{ error: msg === "Ocurrió un error inesperado." ? "Nombre inválido" : msg },
+				{ status: 400 },
+			);
+		}
+
+		const ocrRes = await extraerCamposOcrServidor(uploadBuf, nombreParaOcr, contentType, tipo);
 		const ahoraIso = new Date().toISOString();
 		const ocrCampos = ocrRes.ok ? ocrRes.fields : null;
 		const ocrTramite = ocrRes.tramite;
@@ -108,7 +142,7 @@ export async function POST(request: Request) {
 
 		await eliminarArchivosPreviosDelTipo(supabase, bucket, nombreCompleto, tipo);
 
-		const { error: errS } = await supabase.storage.from(bucket).upload(nombreTecnico, Buffer.from(bytes), {
+		const { error: errS } = await supabase.storage.from(bucket).upload(nombreTecnico, uploadBuf, {
 			contentType,
 			upsert: true,
 		});
@@ -129,7 +163,7 @@ export async function POST(request: Request) {
 			ocrError,
 		});
 		if (errDb) {
-			return NextResponse.json({ error: errDb.message }, { status: 500 });
+			return NextResponse.json({ error: mensajeCausaParaUsuario(errDb) }, { status: 500 });
 		}
 
 		return NextResponse.json({
@@ -145,6 +179,6 @@ export async function POST(request: Request) {
 		});
 	} catch (e) {
 		console.error("orientador subir", e);
-		return NextResponse.json({ error: "Error al subir" }, { status: 500 });
+		return NextResponse.json({ error: mensajeCausaParaUsuario(e) }, { status: 500 });
 	}
 }

@@ -6,7 +6,7 @@ import {
 import { gradoMostradoParaAlumno, normalizarGradoAlumnoPayload } from "@/lib/padron/grado-alumno";
 import { normalizarMatriculaPayload } from "@/lib/padron/matricula-padron";
 import { alumnoRequiereCarrera } from "@/lib/padron/requiere-carrera";
-import { registrarLogApi } from "@/lib/orientador/audit-registrar";
+import { etiquetaAuditoriaOrientador, registrarLogApi } from "@/lib/orientador/audit-registrar";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
 
@@ -247,39 +247,30 @@ export async function PATCH(
 			}
 		}
 
-		const { error: errU } = await supabase.from("padron_alumnos").update(actualizacion).eq("id", padronId);
+		const { data: rpcResult, error: errRpc } = await supabase.rpc("orientador_api_update_padron_alumnos", {
+			p_padron_id: padronId,
+			p_actor_id: orientador.orientadorId,
+			p_actor_etiqueta: etiquetaAuditoriaOrientador(orientador),
+			p_set: actualizacion,
+		});
 
-		if (errU) {
-			if (errU.code === "23505") {
+		if (errRpc) {
+			if (errRpc.code === "23505") {
 				return NextResponse.json(
 					{ error: "Ya existe ese nombre en el grupo destino" },
 					{ status: 409 },
 				);
 			}
-			console.error("padron PATCH", errU);
+			console.error("padron PATCH rpc", errRpc);
 			return NextResponse.json({ error: "No se pudo actualizar" }, { status: 500 });
 		}
 
-		const soloCambioEstado =
-			tocaEstado &&
-			estadoNorm &&
-			!nombreNuevo &&
-			!destino &&
-			!tocaGrado &&
-			!tocaCarrera &&
-			!tocaMatricula;
-		if (soloCambioEstado) {
-			const ref = refExpedienteLog(actual.matricula, padronId);
-			await registrarLogApi({
-				orientador,
-				accion:
-					estadoNorm === "activo"
-						? `Reactivación de expediente ${ref}`
-						: `Expediente ${ref} pasado a archivo muerto`,
-				entidad: "padron_alumnos",
-				entidadId: padronId,
-				detalle: { estado_expediente: estadoNorm },
-			});
+		const rpcOk = rpcResult as { ok?: boolean; error?: string } | null;
+		if (!rpcOk?.ok) {
+			if (rpcOk?.error === "not_found") {
+				return NextResponse.json({ error: "Alumno no encontrado en padrón" }, { status: 404 });
+			}
+			return NextResponse.json({ error: "No se pudo actualizar" }, { status: 500 });
 		}
 
 		return NextResponse.json({

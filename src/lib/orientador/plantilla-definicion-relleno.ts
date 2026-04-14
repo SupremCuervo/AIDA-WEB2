@@ -11,9 +11,21 @@ export const CLAVES_DATO_ALUMNO = [
 	{ clave: "clave_grupo", etiqueta: "Clave / token del grupo" },
 	{ clave: "matricula", etiqueta: "Matrícula" },
 	{ clave: "carrera", etiqueta: "Carrera" },
+	{ clave: "otro", etiqueta: "Otro" },
 ] as const;
 
 export type ClaveDatoAlumno = (typeof CLAVES_DATO_ALUMNO)[number]["clave"];
+
+/** Tamaño por defecto del texto en PDF y en editor (~8px en pantalla ≈ 8 pt). */
+export const PLANTILLA_FUENTE_PT_DEFECTO = 8;
+
+/**
+ * Misma familia que el texto superpuesto en PDF (`StandardFonts.Helvetica` en pdf-lib).
+ * El visor PDF suele sustituir Helvetica por Helvetica o Arial del sistema; en pantalla
+ * forzamos Helvetica/Arial y evitamos `system-ui` o solo «Helvetica Neue» (métricas distintas).
+ */
+export const PLANTILLA_FUENTE_FAMILIA_CSS =
+	'Helvetica, Arial, "Liberation Sans", "Nimbus Sans", sans-serif';
 
 export type CampoPlantillaRelleno = {
 	id: string;
@@ -70,7 +82,7 @@ export function normalizarDefinicionRelleno(raw: unknown): PlantillaDefinicionRe
 			continue;
 		}
 		if (!Number.isFinite(fontSizePt) || fontSizePt < 6 || fontSizePt > 48) {
-			fontSizePt = 11;
+			fontSizePt = PLANTILLA_FUENTE_PT_DEFECTO;
 		}
 		campos.push({
 			id,
@@ -101,5 +113,6 @@ export function construirValoresDesdePadron(fila: {
 		clave_grupo: fila.claveGrupo,
 		matricula: fila.matricula,
 		carrera: fila.carreraNombre,
+		otro: "",
 	};
 }

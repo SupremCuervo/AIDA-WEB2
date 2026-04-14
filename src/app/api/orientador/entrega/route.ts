@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ESTADOS_ENTREGA_DOCUMENTO } from "@/lib/alumno/estado-documento";
 import { orientadorActualizarEstadoEntrega } from "@/lib/alumno/entregas-documento";
 import { esTipoDocumentoValido, type TipoDocumentoClave } from "@/lib/nombre-archivo";
+import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
 
@@ -52,7 +53,7 @@ export async function PATCH(request: Request) {
 			validacionAutomatica: false,
 		});
 		if (error) {
-			return NextResponse.json({ error: error.message }, { status: 500 });
+			return NextResponse.json({ error: mensajeCausaParaUsuario(error) }, { status: 500 });
 		}
 		if (filas === 0) {
 			return NextResponse.json({ error: "No hay entrega registrada para ese documento" }, { status: 404 });
@@ -69,7 +70,7 @@ export async function PATCH(request: Request) {
 		validacionAutomatica: false,
 	});
 	if (error) {
-		return NextResponse.json({ error: error.message }, { status: 500 });
+		return NextResponse.json({ error: mensajeCausaParaUsuario(error) }, { status: 500 });
 	}
 	if (filas === 0) {
 		return NextResponse.json({ error: "No hay entrega registrada para ese documento" }, { status: 404 });

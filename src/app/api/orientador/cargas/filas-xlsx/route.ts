@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { deduplicarFilasCarga, normalizarLetraGrupo } from "@/lib/orientador/cargas-helpers";
 import { leerFilasXlsx } from "@/lib/orientador/xlsx-lectura";
+import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
 
 export const runtime = "nodejs";
@@ -66,8 +67,9 @@ export async function POST(request: Request) {
 		return NextResponse.json({ filas: deduplicarFilasCarga(parseadas) });
 	} catch (e) {
 		console.error("cargas filas-xlsx", e);
+		const msg = mensajeCausaParaUsuario(e);
 		return NextResponse.json(
-			{ error: e instanceof Error ? e.message : "No se pudo leer el Excel" },
+			{ error: msg === "Ocurrió un error inesperado." ? "No se pudo leer el Excel" : msg },
 			{ status: 400 },
 		);
 	}

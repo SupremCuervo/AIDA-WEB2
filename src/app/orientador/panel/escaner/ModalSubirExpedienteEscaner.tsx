@@ -1,10 +1,13 @@
 "use client";
 
+import { mensajeRedAmigable } from "@/lib/mensaje-red-amigable";
+import { mensajeOcrUiCorto } from "@/lib/ocr/mensaje-ocr-ui-corto";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-	entradasFieldsOrdenadas,
-	type CampoOcrCelda,
-} from "@/lib/ocr/campos-ocr-vista";
+	CAMPOS_EDITABLES_POR_TRAMITE_OCR,
+	esTramiteConPlantillaOcr,
+} from "@/lib/ocr/campos-editables-por-tramite-ocr";
+import { type CampoOcrCelda, textoConfianzaOcr } from "@/lib/ocr/campos-ocr-vista";
 
 const TRAMITES_OCR = [
 	{ value: "curp", etiqueta: "CURP" },
@@ -12,6 +15,7 @@ const TRAMITES_OCR = [
 	{ value: "acta_nacimiento", etiqueta: "Acta de nacimiento" },
 	{ value: "comprobante", etiqueta: "Comprobante de domicilio" },
 	{ value: "certificado_medico", etiqueta: "Certificado médico" },
+	{ value: "otro", etiqueta: "Otro (sin OCR)" },
 ] as const;
 
 type TramiteOcr = (typeof TRAMITES_OCR)[number]["value"];
@@ -59,6 +63,50 @@ function valorCampo(fields: Record<string, CampoOcrCelda> | undefined, claves: s
 	return "";
 }
 
+function celdaValorTexto(c: CampoOcrCelda | undefined): string {
+	const v = c?.value;
+	return typeof v === "string" ? v.trim() : "";
+}
+
+function construirOcrCamposParaAdjunto(
+	tramite: TramiteOcr,
+	ocrFields: Record<string, CampoOcrCelda> | null,
+	valoresPlantilla: Record<string, string>,
+): Record<string, CampoOcrCelda> | null {
+	if (tramite === "otro" || !esTramiteConPlantillaOcr(tramite)) {
+		return null;
+	}
+	const plantilla = CAMPOS_EDITABLES_POR_TRAMITE_OCR[tramite];
+	const out: Record<string, CampoOcrCelda> = {};
+	if (ocrFields) {
+		for (const [k, v] of Object.entries(ocrFields)) {
+			out[k] = {
+				value: typeof v?.value === "string" ? v.value : undefined,
+				confidence:
+					typeof v?.confidence === "number" && Number.isFinite(v.confidence) ? v.confidence : undefined,
+			};
+		}
+	}
+	for (const row of plantilla) {
+		const typed = (valoresPlantilla[row.clave] ?? "").trim();
+		const fromOcr = out[row.clave];
+		if (typed !== "" || fromOcr !== undefined) {
+			out[row.clave] = {
+				value: typed !== "" ? typed : (fromOcr?.value ?? ""),
+				...(fromOcr?.confidence != null ? { confidence: fromOcr.confidence } : {}),
+			};
+		}
+	}
+	const cleaned: Record<string, CampoOcrCelda> = {};
+	for (const [k, cell] of Object.entries(out)) {
+		const vv = (cell.value ?? "").trim();
+		if (vv !== "" || cell.confidence != null) {
+			cleaned[k] = cell;
+		}
+	}
+	return Object.keys(cleaned).length > 0 ? cleaned : null;
+}
+
 type Props = {
 	abierto: boolean;
 	pdfBlob: Blob;
@@ -66,6 +114,8 @@ type Props = {
 	primeraPaginaJpeg: Blob;
 	onCerrar: () => void;
 	onExito: () => void;
+	/** Cierra el modal de subida y vuelve a abrir la cámara (mismo flujo de expediente). */
+	onVolverAEscanear?: () => void;
 };
 
 export default function ModalSubirExpedienteEscaner({
@@ -75,11 +125,14 @@ export default function ModalSubirExpedienteEscaner({
 	primeraPaginaJpeg,
 	onCerrar,
 	onExito,
+	onVolverAEscanear,
 }: Props) {
 	const [tramite, setTramite] = useState<TramiteOcr>("curp");
 	const [extrayendo, setExtrayendo] = useState(false);
 	const [ocrFields, setOcrFields] = useState<Record<string, CampoOcrCelda> | null>(null);
 	const [ocrError, setOcrError] = useState("");
+	/** Valores de los párrafos por tipo de documento (como en alumno / Flutter). */
+	const [valoresPlantilla, setValoresPlantilla] = useState<Record<string, string>>({});
 
 	const [alumnos, setAlumnos] = useState<AlumnoExp[]>([]);
 	const [carrerasCat, setCarrerasCat] = useState<{ id: string; nombre: string }[]>([]);
@@ -87,6 +140,10 @@ export default function ModalSubirExpedienteEscaner({
 	const [cargandoCat, setCargandoCat] = useState(false);
 
 	const [busquedaNombre, setBusquedaNombre] = useState("");
+	const [busquedaMatricula, setBusquedaMatricula] = useState("");
+	const [filtroGrado, setFiltroGrado] = useState("");
+	const [filtroGrupo, setFiltroGrupo] = useState("");
+	const [filtroCarreraId, setFiltroCarreraId] = useState("");
 	const [padronIdSel, setPadronIdSel] = useState("");
 	const [matricula, setMatricula] = useState("");
 	const [gradoAlumno, setGradoAlumno] = useState("");
@@ -107,6 +164,8 @@ export default function ModalSubirExpedienteEscaner({
 			form.append("tramite", tramite);
 			form.append("lang", "spa");
 			form.append("use_ocr_space_fallback", "true");
+			form.append("aplicar_preproceso_ocr", "true");
+			form.append("aplicar_saturacion_hsv", "true");
 			const res = await fetch("/api/orientador/ocr/extract", {
 				method: "POST",
 				body: form,
@@ -126,6 +185,14 @@ export default function ModalSubirExpedienteEscaner({
 				return;
 			}
 			setOcrFields(data.fields ?? null);
+			if (esTramiteConPlantillaOcr(tramite)) {
+				const plantilla = CAMPOS_EDITABLES_POR_TRAMITE_OCR[tramite];
+				const next: Record<string, string> = {};
+				for (const row of plantilla) {
+					next[row.clave] = celdaValorTexto(data.fields?.[row.clave]);
+				}
+				setValoresPlantilla(next);
+			}
 			// Claves reales por tramite en github.com/Cat-Not-Furry/API-OCR (extractors/*.py)
 			const nombreOcr = valorCampo(data.fields, [
 				"nombre",
@@ -143,8 +210,8 @@ export default function ModalSubirExpedienteEscaner({
 			if (mat) {
 				setMatricula(mat);
 			}
-		} catch {
-			setOcrError("Error de red al extraer datos.");
+		} catch (e) {
+			setOcrError(mensajeRedAmigable(e));
 		} finally {
 			setExtrayendo(false);
 		}
@@ -155,7 +222,12 @@ export default function ModalSubirExpedienteEscaner({
 			setTramite("curp");
 			setOcrFields(null);
 			setOcrError("");
+			setValoresPlantilla({});
 			setBusquedaNombre("");
+			setBusquedaMatricula("");
+			setFiltroGrado("");
+			setFiltroGrupo("");
+			setFiltroCarreraId("");
 			setPadronIdSel("");
 			setMatricula("");
 			setGradoAlumno("");
@@ -198,21 +270,51 @@ export default function ModalSubirExpedienteEscaner({
 		};
 	}, [abierto]);
 
-	useEffect(() => {
-		if (!abierto || !primeraPaginaJpeg.size) {
-			return;
+	const alCambiarTramite = useCallback((t: TramiteOcr) => {
+		setTramite(t);
+		setOcrFields(null);
+		setOcrError("");
+		setValoresPlantilla({});
+	}, []);
+
+	const ocrCamposParaSubida = useMemo(
+		() => construirOcrCamposParaAdjunto(tramite, ocrFields, valoresPlantilla),
+		[tramite, ocrFields, valoresPlantilla],
+	);
+
+	const plantillaCampos = useMemo(() => {
+		if (tramite === "otro" || !esTramiteConPlantillaOcr(tramite)) {
+			return [];
 		}
-		void ejecutarExtract();
-	}, [abierto, primeraPaginaJpeg, tramite, ejecutarExtract]);
+		return CAMPOS_EDITABLES_POR_TRAMITE_OCR[tramite];
+	}, [tramite]);
 
 	const alumnosFiltrados = useMemo(() => {
 		const q = busquedaNombre.trim().toLowerCase();
+		const qm = busquedaMatricula.trim().toLowerCase();
+		const fg = filtroGrado.trim();
+		const fgr = filtroGrupo.trim().toUpperCase();
+		const fc = filtroCarreraId.trim();
 		const conCuenta = alumnos.filter((a) => a.cuentaId != null && String(a.cuentaId).trim() !== "");
-		if (!q) {
-			return conCuenta;
-		}
-		return conCuenta.filter((a) => a.nombreCompleto.toLowerCase().includes(q));
-	}, [alumnos, busquedaNombre]);
+		return conCuenta.filter((a) => {
+			if (q && !a.nombreCompleto.toLowerCase().includes(q)) {
+				return false;
+			}
+			if (qm && !String(a.matricula ?? "").toLowerCase().includes(qm)) {
+				return false;
+			}
+			if (fg && String(a.grado ?? "").trim() !== fg) {
+				return false;
+			}
+			if (fgr && String(a.grupo ?? "").trim().toUpperCase() !== fgr) {
+				return false;
+			}
+			if (fc && String(a.carreraId ?? "").trim() !== fc) {
+				return false;
+			}
+			return true;
+		});
+	}, [alumnos, busquedaMatricula, busquedaNombre, filtroCarreraId, filtroGrado, filtroGrupo]);
 
 	const alumnoSel = useMemo(
 		() => alumnosFiltrados.find((a) => a.padronId === padronIdSel) ?? null,
@@ -282,8 +384,8 @@ export default function ModalSubirExpedienteEscaner({
 				type: "application/pdf",
 			});
 			fd.append("archivo", archivo);
-			if (ocrFields && Object.keys(ocrFields).length > 0) {
-				fd.append("ocrCamposJson", JSON.stringify(ocrFields));
+			if (ocrCamposParaSubida && Object.keys(ocrCamposParaSubida).length > 0) {
+				fd.append("ocrCamposJson", JSON.stringify(ocrCamposParaSubida));
 				fd.append("ocrTramite", tramite);
 			}
 			const rA = await fetch("/api/orientador/documento/adjunto", {
@@ -298,8 +400,8 @@ export default function ModalSubirExpedienteEscaner({
 			}
 			onExito();
 			onCerrar();
-		} catch {
-			setError("Error de red al guardar.");
+		} catch (e) {
+			setError(mensajeRedAmigable(e));
 		} finally {
 			setSubiendo(false);
 		}
@@ -310,7 +412,7 @@ export default function ModalSubirExpedienteEscaner({
 		grupoDestinoId,
 		matricula,
 		nombreArchivo,
-		ocrFields,
+		ocrCamposParaSubida,
 		pdfBlob,
 		tramite,
 		onCerrar,
@@ -329,13 +431,6 @@ export default function ModalSubirExpedienteEscaner({
 		};
 	}, [abierto, pdfBlob]);
 
-	const filasDatosDetectados = useMemo(() => {
-		if (!ocrFields) {
-			return [];
-		}
-		return entradasFieldsOrdenadas(ocrFields);
-	}, [ocrFields]);
-
 	if (!abierto) {
 		return null;
 	}
@@ -351,7 +446,7 @@ export default function ModalSubirExpedienteEscaner({
 			role="presentation"
 		>
 			<div
-				className="flex max-h-[95vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:max-w-xl"
+				className="flex max-h-[95vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
 				onClick={(e) => e.stopPropagation()}
 				role="dialog"
 				aria-modal="true"
@@ -368,19 +463,31 @@ export default function ModalSubirExpedienteEscaner({
 							<path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
 						</svg>
 					</button>
-					<h2 id="titulo-subir-escaner" className="flex-1 text-center text-base font-bold text-slate-900">
+					<h2 id="titulo-subir-escaner" className="min-w-0 flex-1 truncate text-center text-base font-bold text-slate-900">
 						Subir archivo
 					</h2>
-					<span className="w-9" />
+					{onVolverAEscanear ? (
+						<button
+							type="button"
+							onClick={onVolverAEscanear}
+							className="shrink-0 rounded-lg border border-violet-200 bg-violet-50 px-2 py-1.5 text-xs font-semibold text-violet-800 hover:bg-violet-100"
+						>
+							Volver a escanear
+						</button>
+					) : (
+						<span className="w-9 shrink-0" aria-hidden />
+					)}
 				</div>
 
 				<div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-					<div className="mb-3 grid gap-2 sm:grid-cols-2">
+					<div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+						<div>
+							<div className="mb-3 grid gap-2 sm:grid-cols-2">
 						<label className="text-xs font-medium text-slate-600">
 							Tipo de documento (OCR)
 							<select
 								value={tramite}
-								onChange={(e) => setTramite(e.target.value as TramiteOcr)}
+								onChange={(e) => alCambiarTramite(e.target.value as TramiteOcr)}
 								className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
 							>
 								{TRAMITES_OCR.map((t) => (
@@ -391,37 +498,79 @@ export default function ModalSubirExpedienteEscaner({
 							</select>
 						</label>
 						<p className="self-end text-xs text-slate-500">
-							{extrayendo ? "Extrayendo datos…" : ocrError ? ocrError : ocrFields ? "Revisa los datos detectados abajo." : ""}
+							{tramite === "otro"
+								? "Sin OCR para este tipo."
+								: extrayendo
+									? "Extrayendo datos…"
+									: ocrError
+										? mensajeOcrUiCorto(ocrError)
+										: ocrFields
+											? "Revisa y corrige los campos abajo si hace falta."
+											: "Puedes extraer OCR o escribir los datos a mano."}
 						</p>
-					</div>
+							</div>
 
-					{filasDatosDetectados.length > 0 ? (
+					{tramite !== "otro" ? (
+						<div className="mb-3">
+							<button
+								type="button"
+								onClick={() => void ejecutarExtract()}
+								disabled={extrayendo || !primeraPaginaJpeg.size}
+								className="w-full rounded-xl border border-violet-300 bg-white py-2.5 text-sm font-semibold text-violet-800 shadow-sm hover:bg-violet-50 disabled:opacity-50 sm:w-auto sm:px-6"
+							>
+								{extrayendo ? "Extrayendo…" : "Extraer datos (OCR)"}
+							</button>
+						</div>
+					) : null}
+
+					{plantillaCampos.length > 0 ? (
 						<section
 							className="mb-4 rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-3"
-							aria-labelledby="titulo-datos-ocr"
+							aria-labelledby="titulo-datos-doc-plantilla"
 						>
-							<h3 id="titulo-datos-ocr" className="text-xs font-bold uppercase tracking-wide text-violet-900">
-								Datos detectados (OCR)
+							<h3 id="titulo-datos-doc-plantilla" className="text-xs font-bold uppercase tracking-wide text-violet-900">
+								Datos del documento
 							</h3>
 							<p className="mt-1 text-[11px] leading-snug text-violet-800/90">
-								Informativo: vienen del servicio según el tipo de documento elegido. No sustituyen al padrón: confirma
-								al alumno, ajusta matrícula o grupo si aplica y sube el PDF al expediente.
+								Campos según el tipo elegido. Usa «Extraer datos (OCR)» para autocompletar o escribe a mano; no sustituyen al padrón.
 							</p>
-							<dl className="mt-2 space-y-2 border-t border-violet-200/80 pt-2">
-								{filasDatosDetectados.map((fila) => (
-									<div key={fila.clave} className="grid grid-cols-1 gap-0.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start sm:gap-2">
-										<dt className="text-[11px] font-semibold text-slate-700">{fila.etiqueta}</dt>
-										<dd className="flex flex-wrap items-baseline gap-x-2 text-sm text-slate-900">
-											<span className="break-words">{fila.valor}</span>
-											{fila.conf ? (
-												<span className="shrink-0 text-[10px] font-medium text-slate-500" title="Confianza estimada del extractor">
-													{fila.conf}
-												</span>
+							<div className="mt-3 space-y-3 border-t border-violet-200/80 pt-3">
+								{plantillaCampos.map((c) => {
+									const conf = ocrFields?.[c.clave]?.confidence;
+									const confTxt = textoConfianzaOcr(conf);
+									return (
+										<div key={c.clave}>
+											<label className="block text-[11px] font-semibold text-slate-700" htmlFor={`ocr-campo-${c.clave}`}>
+												{c.etiqueta}
+											</label>
+											{c.multiline ? (
+												<textarea
+													id={`ocr-campo-${c.clave}`}
+													rows={3}
+													value={valoresPlantilla[c.clave] ?? ""}
+													onChange={(e) =>
+														setValoresPlantilla((prev) => ({ ...prev, [c.clave]: e.target.value }))
+													}
+													className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 shadow-sm"
+												/>
+											) : (
+												<input
+													id={`ocr-campo-${c.clave}`}
+													type="text"
+													value={valoresPlantilla[c.clave] ?? ""}
+													onChange={(e) =>
+														setValoresPlantilla((prev) => ({ ...prev, [c.clave]: e.target.value }))
+													}
+													className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 shadow-sm"
+												/>
+											)}
+											{confTxt ? (
+												<p className="mt-0.5 text-[10px] text-slate-500">Confianza OCR: {confTxt}</p>
 											) : null}
-										</dd>
-									</div>
-								))}
-							</dl>
+										</div>
+									);
+								})}
+							</div>
 						</section>
 					) : null}
 
@@ -436,6 +585,57 @@ export default function ModalSubirExpedienteEscaner({
 						/>
 					</label>
 
+					<div className="mb-2 grid gap-2 sm:grid-cols-2">
+						<label className="text-xs font-medium text-slate-600">
+							Buscar matrícula
+							<input
+								type="search"
+								value={busquedaMatricula}
+								onChange={(e) => setBusquedaMatricula(e.target.value)}
+								className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+								placeholder="Ej. 24001234"
+							/>
+						</label>
+						<label className="text-xs font-medium text-slate-600">
+							Carrera (filtro)
+							<select
+								value={filtroCarreraId}
+								onChange={(e) => setFiltroCarreraId(e.target.value)}
+								className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+							>
+								<option value="">Todas</option>
+								{carrerasCat.map((c) => (
+									<option key={c.id} value={c.id}>
+										{c.nombre}
+									</option>
+								))}
+							</select>
+						</label>
+					</div>
+
+					<div className="mb-2 grid grid-cols-2 gap-2">
+						<label className="text-xs font-medium text-slate-600">
+							Grado (filtro)
+							<input
+								type="text"
+								value={filtroGrado}
+								onChange={(e) => setFiltroGrado(e.target.value.replace(/\D+/g, "").slice(0, 1))}
+								className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+								placeholder="Ej. 1"
+							/>
+						</label>
+						<label className="text-xs font-medium text-slate-600">
+							Grupo (filtro)
+							<input
+								type="text"
+								value={filtroGrupo}
+								onChange={(e) => setFiltroGrupo(e.target.value.toUpperCase().slice(0, 2))}
+								className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+								placeholder="Ej. A"
+							/>
+						</label>
+					</div>
+
 					<label className="mb-2 block text-xs font-medium text-slate-600">
 						Alumno
 						<select
@@ -447,7 +647,7 @@ export default function ModalSubirExpedienteEscaner({
 							<option value="">— Seleccionar —</option>
 							{alumnosFiltrados.slice(0, 500).map((a) => (
 								<option key={a.padronId} value={a.padronId}>
-									{a.nombreCompleto} · {a.grado}° {a.grupo}
+									{a.nombreCompleto}
 								</option>
 							))}
 						</select>
@@ -457,6 +657,14 @@ export default function ModalSubirExpedienteEscaner({
 							</p>
 						) : null}
 					</label>
+
+					{alumnoSel ? (
+						<div className="mb-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
+							<span className="font-semibold">Grado:</span> {alumnoSel.grado || "—"}{" "}
+							<span className="mx-2 text-violet-300">|</span>
+							<span className="font-semibold">Grupo:</span> {alumnoSel.grupo || "—"}
+						</div>
+					) : null}
 
 					<div className="mb-2 grid grid-cols-2 gap-2">
 						<label className="text-xs font-medium text-slate-600">
@@ -480,7 +688,7 @@ export default function ModalSubirExpedienteEscaner({
 									const id = idDestinoGrupo(g);
 									return (
 										<option key={id} value={id}>
-											{g.grado}° {g.grupo}
+											{g.grupo}
 										</option>
 									);
 								})}
@@ -514,17 +722,18 @@ export default function ModalSubirExpedienteEscaner({
 						</select>
 					</label>
 
-					<p className="mb-1 text-center text-sm font-medium text-slate-800">{nombreArchivo}</p>
-					<div className="mx-auto mb-3 max-h-48 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-2">
-						<p className="mb-1 text-center text-xs text-slate-500">Vista previa</p>
-						{previewUrl ? (
-							<iframe title="Vista previa PDF" src={previewUrl} className="h-40 w-full border-0" />
-						) : (
-							<div className="flex h-40 items-center justify-center text-slate-400">PDF</div>
-						)}
-					</div>
-
 					{error ? <p className="mb-2 text-sm text-red-600">{error}</p> : null}
+						</div>
+						<div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+							<p className="mb-1 text-center text-sm font-semibold text-slate-800">{nombreArchivo}</p>
+							<p className="mb-2 text-center text-xs text-slate-500">Vista previa del documento</p>
+							{previewUrl ? (
+								<iframe title="Vista previa PDF" src={previewUrl} className="h-[62vh] min-h-[360px] w-full rounded-lg border border-slate-200 bg-white" />
+							) : (
+								<div className="flex h-[62vh] min-h-[360px] items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400">PDF</div>
+							)}
+						</div>
+					</div>
 				</div>
 
 				<div className="shrink-0 border-t border-slate-100 p-4">
@@ -532,7 +741,7 @@ export default function ModalSubirExpedienteEscaner({
 						type="button"
 						onClick={() => void agregarExpediente()}
 						disabled={subiendo}
-						className="flex w-full items-center justify-center gap-2 rounded-xl bg-slate-600 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+						className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#7C3AED] bg-[#7C3AED] py-3 text-sm font-semibold text-white transition hover:bg-[#6D28D9] disabled:opacity-50"
 					>
 						{subiendo ? "Subiendo…" : "Agregar al expediente"}
 						<span aria-hidden>⬆</span>

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ESTADOS_ENTREGA_DOCUMENTO, type EstadoEntregaDocumentoPersistido } from "@/lib/alumno/estado-documento";
+import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import type { CampoOcrCelda } from "@/lib/ocr/campos-ocr-vista";
 import { parseCamposOcrDesdeJson } from "@/lib/ocr/campos-ocr-vista";
 import { slugificar, TIPOS_DOCUMENTO, type TipoDocumentoClave } from "@/lib/nombre-archivo";
@@ -10,10 +11,12 @@ export async function contarEntregasPorCuenta(
 	supabase: SupabaseClient,
 	cuentaId: string,
 ): Promise<number> {
+	const tiposObligatorios = Object.keys(TIPOS_DOCUMENTO);
 	const { data, error } = await supabase
 		.from(TABLA_ENTREGAS)
 		.select("tipo_documento")
-		.eq("cuenta_id", cuentaId);
+		.eq("cuenta_id", cuentaId)
+		.in("tipo_documento", tiposObligatorios);
 	if (error) {
 		console.error("contarEntregasPorCuenta", error);
 		return 0;
@@ -128,7 +131,7 @@ export async function upsertEntregaDocumento(
 		},
 		{ onConflict: "cuenta_id,tipo_documento" },
 	);
-	return { error: error ? new Error(error.message) : null };
+	return { error: error ? new Error(mensajeCausaParaUsuario(error)) : null };
 }
 
 export async function upsertEntregaAdjuntoOrientador(
@@ -165,13 +168,13 @@ export async function upsertEntregaAdjuntoOrientador(
 		},
 		{ onConflict: "cuenta_id,tipo_documento" },
 	);
-	return { error: error ? new Error(error.message) : null };
+	return { error: error ? new Error(mensajeCausaParaUsuario(error)) : null };
 }
 
 export async function actualizarOcrCamposEnEntrega(
 	supabase: SupabaseClient,
 	cuentaId: string,
-	tipoDocumento: TipoDocumentoClave,
+	tipoDocumento: string,
 	nuevoOcrCampos: Record<string, CampoOcrCelda>,
 ): Promise<{ error: Error | null }> {
 	const { data: existente, error: errQ } = await supabase
@@ -181,7 +184,7 @@ export async function actualizarOcrCamposEnEntrega(
 		.eq("tipo_documento", tipoDocumento)
 		.maybeSingle();
 	if (errQ) {
-		return { error: new Error(errQ.message) };
+		return { error: new Error(mensajeCausaParaUsuario(errQ)) };
 	}
 	const ruta = existente?.ruta_storage != null ? String(existente.ruta_storage).trim() : "";
 	if (!ruta) {
@@ -197,7 +200,7 @@ export async function actualizarOcrCamposEnEntrega(
 		})
 		.eq("cuenta_id", cuentaId)
 		.eq("tipo_documento", tipoDocumento);
-	return { error: error ? new Error(error.message) : null };
+	return { error: error ? new Error(mensajeCausaParaUsuario(error)) : null };
 }
 
 export async function eliminarEntregaPorCuentaYTipo(
@@ -229,7 +232,7 @@ export async function eliminarEntregaPorCuentaYTipo(
 		.eq("cuenta_id", cuentaId)
 		.eq("tipo_documento", tipoDocumento);
 	if (errD) {
-		return { error: new Error(errD.message) };
+		return { error: new Error(mensajeCausaParaUsuario(errD)) };
 	}
 	return { error: null };
 }
@@ -257,7 +260,7 @@ export async function orientadorActualizarEstadoEntrega(
 		.eq("tipo_documento", params.tipoDocumento)
 		.select("id");
 	if (error) {
-		return { error: new Error(error.message), filas: 0 };
+		return { error: new Error(mensajeCausaParaUsuario(error)), filas: 0 };
 	}
 	return { error: null, filas: data?.length ?? 0 };
 }

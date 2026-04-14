@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { IconoSalir } from "@/app/alumno/aida-iconos";
 import { gradoEtiquetaParaVistaAlumno } from "@/lib/padron/grado-alumno";
 import MisDocumentosAlumno from "./MisDocumentosAlumno";
@@ -28,6 +29,8 @@ export default function PanelAlumnoPage() {
 	const router = useRouter();
 	const [sesion, setSesion] = useState<Sesion | null>(null);
 	const [salirCargando, setSalirCargando] = useState(false);
+	const [confirmarSalirAbierto, setConfirmarSalirAbierto] = useState(false);
+	const [montado, setMontado] = useState(false);
 	const [carreraSel, setCarreraSel] = useState<string>("__sin__");
 	const [carreraGuardando, setCarreraGuardando] = useState(false);
 	const [carreraMsg, setCarreraMsg] = useState<{ ok: boolean; t: string } | null>(null);
@@ -45,6 +48,23 @@ export default function PanelAlumnoPage() {
 	useEffect(() => {
 		cargar();
 	}, [cargar]);
+
+	useEffect(() => {
+		setMontado(true);
+	}, []);
+
+	useEffect(() => {
+		if (!confirmarSalirAbierto) {
+			return;
+		}
+		function onKey(e: KeyboardEvent) {
+			if (e.key === "Escape" && !salirCargando) {
+				setConfirmarSalirAbierto(false);
+			}
+		}
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [confirmarSalirAbierto, salirCargando]);
 
 	useEffect(() => {
 		if (!sesion?.requiereCarrera) {
@@ -165,10 +185,12 @@ export default function PanelAlumnoPage() {
 						<div className="flex shrink-0 flex-col items-end justify-center">
 							<button
 								type="button"
-								onClick={salir}
+								onClick={() => setConfirmarSalirAbierto(true)}
 								disabled={salirCargando}
 								aria-label="Cerrar sesión"
 								aria-busy={salirCargando}
+								aria-haspopup="dialog"
+								aria-expanded={confirmarSalirAbierto}
 								className="inline-flex items-center justify-center rounded-lg border border-[#B91C1C] bg-[#DC2626] p-2 text-white shadow-sm transition hover:border-[#991B1B] hover:bg-[#B91C1C] disabled:opacity-50 sm:p-2.5"
 							>
 								<IconoSalir className="h-5 w-5 sm:h-6 sm:w-6" aria-hidden />
@@ -192,6 +214,9 @@ export default function PanelAlumnoPage() {
 									<span className="font-medium text-[#1E293B]">{sesion.carreraNombre}</span>
 								</>
 							) : null}
+						</p>
+						<p className="mx-auto mt-2 max-w-2xl text-sm leading-relaxed text-[#6B7280] sm:text-base">
+							Debes subir tus documentos a tiempo en AIDA; si no lo haces aquí, tendrás que acudir a la escuela para completar tu trámite de manera presencial.
 						</p>
 						{sesion.requiereCarrera ? (
 							<div className="mx-auto mt-4 flex max-w-xl flex-col gap-2 rounded-xl border border-[#EDE9FE] bg-[#F5F3FF] px-4 py-3 text-sm text-[#1E293B] sm:flex-row sm:flex-wrap sm:items-end">
@@ -238,6 +263,58 @@ export default function PanelAlumnoPage() {
 
 				</main>
 			</div>
+			{montado && confirmarSalirAbierto
+				? createPortal(
+						<div
+							className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-[2px]"
+							onClick={(e) => {
+								if (e.target === e.currentTarget && !salirCargando) {
+									setConfirmarSalirAbierto(false);
+								}
+							}}
+							role="presentation"
+						>
+							<div
+								className="w-full max-w-[min(100%,22rem)] overflow-hidden rounded-[1.75rem] border border-violet-100 bg-white text-center shadow-[0_25px_50px_-12px_rgba(91,33,182,0.18),0_0_0_1px_rgba(255,255,255,0.8)_inset] sm:max-w-md"
+								onClick={(e) => e.stopPropagation()}
+								role="dialog"
+								aria-modal="true"
+								aria-labelledby="alumno-confirmar-salir-titulo"
+							>
+								<div className="bg-gradient-to-br from-violet-50 via-white to-sky-50/80 px-7 pb-8 pt-9 sm:px-10 sm:pb-9 sm:pt-10">
+									<p
+										id="alumno-confirmar-salir-titulo"
+										className="text-xl font-bold tracking-tight text-slate-800 sm:text-2xl"
+									>
+										¿Deseas cerrar sesión?
+									</p>
+									<p className="mx-auto mt-3 max-w-[18rem] text-sm leading-relaxed text-slate-500 sm:text-[0.9375rem]">
+										Saldrás del panel del alumno. Podrás volver a entrar cuando quieras.
+									</p>
+									<div className="mt-9 flex flex-col gap-3 sm:mt-10 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center sm:gap-4">
+										<button
+											type="button"
+											disabled={salirCargando}
+											onClick={() => setConfirmarSalirAbierto(false)}
+											className="w-full rounded-2xl border-2 border-[#3B82F6] bg-[#DBEAFE] px-6 py-3 text-sm font-semibold text-[#1D4ED8] shadow-sm transition hover:border-[#2563EB] hover:bg-[#BFDBFE] disabled:opacity-60 sm:w-auto sm:min-w-[7.5rem] sm:text-base"
+										>
+											No
+										</button>
+										<button
+											type="button"
+											disabled={salirCargando}
+											onClick={() => void salir()}
+											className="w-full rounded-2xl border-2 border-[#7C3AED] bg-[#EDE9FE] px-6 py-3 text-sm font-semibold text-[#5B21B6] shadow-sm transition hover:border-[#6D28D9] hover:bg-[#DDD6FE] disabled:opacity-60 sm:w-auto sm:min-w-[7.5rem] sm:text-base"
+										>
+											{salirCargando ? "Cerrando…" : "Sí"}
+										</button>
+									</div>
+								</div>
+							</div>
+						</div>,
+						document.body,
+					)
+				: null}
 		</PanelAlumnoProvider>
 	);
 }

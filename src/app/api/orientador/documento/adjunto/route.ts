@@ -11,7 +11,12 @@ import {
 	nombreRutaStorageAdjuntoOrientador,
 	slugificar,
 } from "@/lib/nombre-archivo";
+import {
+	bufferImagenJpegPngAPdf,
+	esImagenConvertibleApdf,
+} from "@/lib/archivos/imagen-a-pdf-buffer";
 import { registrarLogApi } from "@/lib/orientador/audit-registrar";
+import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
 
@@ -118,7 +123,32 @@ export async function POST(request: Request) {
 			return NextResponse.json({ error: "No se pudo resolver el nombre del padrón" }, { status: 500 });
 		}
 
-		const ext = extensionDesdeNombre(archivo.name);
+		let bytes: Uint8Array;
+		try {
+			bytes = new Uint8Array(await archivo.arrayBuffer());
+		} catch (e) {
+			console.error("orientador adjunto lectura archivo", e);
+			return NextResponse.json({ error: "No se pudo leer el archivo" }, { status: 400 });
+		}
+
+		let uploadBuf = Buffer.from(bytes);
+		let contentType = archivo.type || "application/octet-stream";
+		let extFinal = extensionDesdeNombre(archivo.name);
+		if (esImagenConvertibleApdf(contentType)) {
+			try {
+				const pdfBytes = await bufferImagenJpegPngAPdf(uploadBuf, contentType);
+				uploadBuf = Buffer.from(pdfBytes);
+				contentType = "application/pdf";
+				extFinal = "pdf";
+			} catch (e) {
+				console.error("orientador adjunto imagen a pdf", e);
+				return NextResponse.json(
+					{ error: "No se pudo convertir la imagen a PDF. Usa JPG o PNG." },
+					{ status: 400 },
+				);
+			}
+		}
+
 		const slugAlumno = slugificar(nombreCompleto);
 		let nombreTecnico: string;
 		try {
@@ -126,17 +156,17 @@ export async function POST(request: Request) {
 				slugAlumno,
 				etiqueta,
 				tipoNuevo,
-				ext || "pdf",
+				extFinal || "pdf",
 			);
 		} catch (e) {
-			const msg = e instanceof Error ? e.message : "Nombre inválido";
-			return NextResponse.json({ error: msg }, { status: 400 });
+			const msg = mensajeCausaParaUsuario(e);
+			return NextResponse.json(
+				{ error: msg === "Ocurrió un error inesperado." ? "Nombre inválido" : msg },
+				{ status: 400 },
+			);
 		}
 
-		const bytes = new Uint8Array(await archivo.arrayBuffer());
-		const contentType = archivo.type || "application/octet-stream";
-
-		const { error: errS } = await supabase.storage.from(bucket).upload(nombreTecnico, Buffer.from(bytes), {
+		const { error: errS } = await supabase.storage.from(bucket).upload(nombreTecnico, uploadBuf, {
 			contentType,
 			upsert: true,
 		});
@@ -159,7 +189,7 @@ export async function POST(request: Request) {
 		});
 		if (errDb) {
 			await supabase.storage.from(bucket).remove([nombreTecnico]);
-			return NextResponse.json({ error: errDb.message }, { status: 500 });
+			return NextResponse.json({ error: mensajeCausaParaUsuario(errDb) }, { status: 500 });
 		}
 
 		return NextResponse.json({
@@ -205,7 +235,7 @@ export async function DELETE(request: Request) {
 		const supabase = obtenerClienteSupabaseAdmin();
 		const { error } = await eliminarEntregaPorCuentaYTipo(supabase, bucket, cuentaId, tipoDocumento);
 		if (error) {
-			return NextResponse.json({ error: error.message }, { status: 400 });
+			return NextResponse.json({ error: mensajeCausaParaUsuario(error) }, { status: 400 });
 		}
 		await registrarLogApi({
 			orientador,

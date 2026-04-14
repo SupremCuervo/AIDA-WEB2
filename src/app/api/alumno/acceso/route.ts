@@ -165,8 +165,7 @@ async function accesoModoGrupo(
 		return NextResponse.json(
 			{
 				code: "NOT_IN_PADRON",
-				error:
-					"Tu nombre no coincide con el padrón de este grupo. Debe escribirse tal como registró el orientador.",
+				error: "Tu nombre no coincide que estes en un grupo.",
 			},
 			{ status: 403 },
 		);

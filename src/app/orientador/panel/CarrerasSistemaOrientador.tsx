@@ -5,7 +5,13 @@ import { DURACION_MENSAJE_EMERGENTE_MS } from "@/lib/ui/duracion-mensaje-emergen
 
 type CarreraRow = { id: string; codigo: string; nombre: string };
 
-export default function CarrerasSistemaOrientador() {
+type PropsCarrerasSistema = {
+	/** En panel Escolar: sin título principal duplicado ni margen superior extra. */
+	variante?: "pagina" | "incrustado";
+};
+
+export default function CarrerasSistemaOrientador({ variante = "pagina" }: PropsCarrerasSistema) {
+	const incrustado = variante === "incrustado";
 	const [lista, setLista] = useState<CarreraRow[]>([]);
 	const [cargando, setCargando] = useState(true);
 	const [errorMsg, setErrorMsg] = useState("");
@@ -113,11 +119,13 @@ export default function CarrerasSistemaOrientador() {
 	}
 
 	return (
-		<div className="mx-auto mt-5 max-w-3xl px-4 pb-16">
-			<h2 className="text-center text-2xl font-bold text-slate-900">Carreras</h2>
-			<p className="mt-3 flex flex-wrap items-center justify-center gap-2 text-center text-sm text-slate-600">
-
-			</p>
+		<div className={`mx-auto w-full max-w-none pb-16 ${incrustado ? "" : "mt-5"}`}>
+			{!incrustado ? (
+				<>
+					<h2 className="text-center text-2xl font-bold text-slate-900">Carreras</h2>
+					<p className="mt-3 flex flex-wrap items-center justify-center gap-2 text-center text-sm text-slate-600"></p>
+				</>
+			) : null}
 
 			{errorMsg ? (
 				<p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-center text-sm text-red-700">{errorMsg}</p>
@@ -161,16 +169,15 @@ export default function CarrerasSistemaOrientador() {
 								className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4 sm:flex-row sm:items-center sm:justify-between"
 							>
 								<div className="min-w-0 flex-1">
-									<p className="font-mono text-xs text-slate-500">Código: {c.codigo}</p>
 									{editId === c.id ? (
 										<input
 											type="text"
 											value={editNombre}
 											onChange={(e) => setEditNombre(e.target.value)}
-											className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
+											className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
 										/>
 									) : (
-										<p className="mt-1 font-semibold text-slate-900">{c.nombre}</p>
+										<p className="font-semibold text-slate-900">{c.nombre}</p>
 									)}
 								</div>
 								<div className="flex shrink-0 flex-wrap gap-2">
@@ -199,7 +206,7 @@ export default function CarrerasSistemaOrientador() {
 										<button
 											type="button"
 											onClick={() => iniciarEdicion(c)}
-											className="rounded-lg border border-slate-400 bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-900"
+											className="rounded-lg border-2 border-[#2563EB] bg-[#DBEAFE] px-4 py-2 text-sm font-semibold text-[#1E40AF] transition hover:bg-[#BFDBFE]"
 										>
 											Editar nombre
 										</button>

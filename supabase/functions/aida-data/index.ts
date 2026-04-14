@@ -22,6 +22,36 @@ const TABLA_ENT = "entregas_documento_alumno";
 const MAX_BYTES = 15 * 1024 * 1024;
 const MAX_PLANTILLA = 25 * 1024 * 1024;
 
+/** Evita devolver mensajes crudos de Postgres/PostgREST al cliente de la app. */
+function mensajeErrorPostgrestParaCliente(msg: string): string {
+	const m = msg.trim();
+	const l = m.toLowerCase();
+	if (l.includes("jwt expired") || l.includes("invalid jwt")) {
+		return "La sesión caducó. Vuelve a iniciar sesión.";
+	}
+	if (l.includes("permission denied") || l.includes("row-level security")) {
+		return "No tienes permiso para esta acción.";
+	}
+	if (l.includes("duplicate key") || l.includes("unique constraint")) {
+		return "Ese registro ya existe o está duplicado.";
+	}
+	if (l.includes("foreign key")) {
+		return "No se puede completar: hay datos relacionados que lo impiden.";
+	}
+	if (m.length > 240) {
+		return "Error al guardar en la base de datos.";
+	}
+	return m;
+}
+
+function mensajeErrorCapturaParaCliente(e: unknown): string {
+	if (e instanceof Error) {
+		return mensajeErrorPostgrestParaCliente(e.message);
+	}
+	const s = String(e).trim();
+	return s.length > 0 && s.length < 220 ? s : "Error interno.";
+}
+
 const ETIQUETAS: Record<string, string> = {
 	acta_nacimiento: "Acta de nacimiento",
 	curp: "CURP",
@@ -316,6 +346,22 @@ Deno.serve(async (req) => {
 				return jsonRes({ error: "No se pudo guardar el archivo" }, 500);
 			}
 			const ahora = new Date().toISOString();
+			const rawOcr = payload["ocrCampos"];
+			const ocrCampos =
+				rawOcr != null && typeof rawOcr === "object" && !Array.isArray(rawOcr)
+					? (rawOcr as Record<string, unknown>)
+					: null;
+			const ocrTramiteRaw = payload["ocrTramite"];
+			const ocrTramite =
+				typeof ocrTramiteRaw === "string" && ocrTramiteRaw.trim() !== "" ? ocrTramiteRaw.trim() : null;
+			const ocrErrorRaw = payload["ocrError"];
+			const ocrError =
+				typeof ocrErrorRaw === "string" && ocrErrorRaw.trim() !== "" ? ocrErrorRaw.trim() : null;
+			const tieneOcrMeta =
+				ocrTramite != null ||
+				ocrError != null ||
+				(ocrCampos != null && Object.keys(ocrCampos).length > 0);
+			const ocrExtraidoEn = tieneOcrMeta ? ahora : null;
 			const { error: errDb } = await sb.from(TABLA_ENT).upsert(
 				{
 					cuenta_id: cuentaId,
@@ -327,12 +373,16 @@ Deno.serve(async (req) => {
 					etiqueta_personalizada: null,
 					actualizado_en: ahora,
 					subido_en: ahora,
+					ocr_campos: ocrCampos,
+					ocr_tramite: ocrTramite,
+					ocr_extraido_en: ocrExtraidoEn,
+					ocr_error: ocrError,
 				},
 				{ onConflict: "cuenta_id,tipo_documento" },
 			);
 			if (errDb) {
 				await sb.storage.from(bucket).remove([nombreTecnico]);
-				return jsonRes({ error: errDb.message }, 500);
+				return jsonRes({ error: mensajeErrorPostgrestParaCliente(errDb.message) }, 500);
 			}
 			return jsonRes({ ok: true, ruta: nombreTecnico });
 		}
@@ -681,7 +731,7 @@ Deno.serve(async (req) => {
 			}
 			const { error } = await sb.from("padron_alumnos").update(update).eq("id", padronId);
 			if (error) {
-				return jsonRes({ error: error.message }, 500);
+				return jsonRes({ error: mensajeErrorPostgrestParaCliente(error.message) }, 500);
 			}
 			return jsonRes({ ok: true });
 		}
@@ -730,6 +780,24 @@ Deno.serve(async (req) => {
 				return jsonRes({ error: "No se pudo guardar el archivo" }, 500);
 			}
 			const ahora = new Date().toISOString();
+			const rawOcrAdj = payload["ocrCampos"];
+			const ocrCamposAdj =
+				rawOcrAdj != null && typeof rawOcrAdj === "object" && !Array.isArray(rawOcrAdj)
+					? (rawOcrAdj as Record<string, unknown>)
+					: null;
+			const ocrTramiteAdjRaw = payload["ocrTramite"];
+			const ocrTramiteAdj =
+				typeof ocrTramiteAdjRaw === "string" && ocrTramiteAdjRaw.trim() !== ""
+					? ocrTramiteAdjRaw.trim().slice(0, 64)
+					: null;
+			const ocrErrorAdjRaw = payload["ocrError"];
+			const ocrErrorAdj =
+				typeof ocrErrorAdjRaw === "string" && ocrErrorAdjRaw.trim() !== "" ? ocrErrorAdjRaw.trim().slice(0, 2000) : null;
+			const tieneOcrMetaAdj =
+				ocrTramiteAdj != null ||
+				ocrErrorAdj != null ||
+				(ocrCamposAdj != null && Object.keys(ocrCamposAdj).length > 0);
+			const ocrExtraidoEnAdj = tieneOcrMetaAdj ? ahora : null;
 			const { error: errDb } = await sb.from(TABLA_ENT).upsert(
 				{
 					cuenta_id: cuentaId,
@@ -741,12 +809,16 @@ Deno.serve(async (req) => {
 					etiqueta_personalizada: etiqueta,
 					actualizado_en: ahora,
 					subido_en: ahora,
+					ocr_campos: ocrCamposAdj,
+					ocr_tramite: ocrTramiteAdj,
+					ocr_extraido_en: ocrExtraidoEnAdj,
+					ocr_error: ocrErrorAdj,
 				},
 				{ onConflict: "cuenta_id,tipo_documento" },
 			);
 			if (errDb) {
 				await sb.storage.from(bucket).remove([nombreTecnico]);
-				return jsonRes({ error: errDb.message }, 500);
+				return jsonRes({ error: mensajeErrorPostgrestParaCliente(errDb.message) }, 500);
 			}
 			return jsonRes({ ok: true, tipoDocumento: tipoNuevo, nombreTecnico, etiqueta });
 		}
@@ -870,14 +942,14 @@ Deno.serve(async (req) => {
 			});
 			if (errI) {
 				await sb.storage.from(bucket).remove([ruta]);
-				return jsonRes({ error: errI.message }, 500);
+				return jsonRes({ error: mensajeErrorPostgrestParaCliente(errI.message) }, 500);
 			}
 			return jsonRes({ ok: true });
 		}
 
 		return jsonRes({ error: `Acción desconocida: ${action}` }, 400);
 	} catch (e) {
-		const msg = e instanceof Error ? e.message : String(e);
+		const msg = mensajeErrorCapturaParaCliente(e);
 		console.error(e);
 		return jsonRes({ error: msg }, 500);
 	}

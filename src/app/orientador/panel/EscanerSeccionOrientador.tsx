@@ -26,7 +26,7 @@ export default function EscanerSeccionOrientador() {
 	}, []);
 
 	return (
-		<div className="mx-auto mt-5 flex w-full max-w-5xl flex-col items-center px-4 sm:px-6">
+		<div className="mx-auto mt-5 flex w-full max-w-none flex-col items-center">
 			<h2 className="mb-10 text-center text-2xl font-bold tracking-tight text-[#111827] sm:mb-12 sm:text-3xl">
 				Escaneo de archivos mediante cámara
 			</h2>
@@ -131,6 +131,13 @@ export default function EscanerSeccionOrientador() {
 					onCerrar={() => {
 						setSubirAbierto(false);
 						setResultadoPdf(null);
+					}}
+					onVolverAEscanear={() => {
+						setSubirAbierto(false);
+						setResultadoPdf(null);
+						queueMicrotask(() => {
+							setCapturaPdf(true);
+						});
 					}}
 					onExito={() => {
 						setResultadoPdf(null);

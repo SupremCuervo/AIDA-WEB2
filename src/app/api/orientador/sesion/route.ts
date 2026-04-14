@@ -12,5 +12,6 @@ export async function GET() {
 		autenticado: true,
 		email: p.email,
 		nombre: p.nombre,
+		rolPanel: p.rolPanel,
 	});
 }

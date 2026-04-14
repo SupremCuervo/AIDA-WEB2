@@ -7,6 +7,8 @@ import {
 import { gradoMostradoParaAlumno, normalizarGradoAlumnoPayload } from "@/lib/padron/grado-alumno";
 import { normalizarMatriculaPayload } from "@/lib/padron/matricula-padron";
 import { alumnoRequiereCarrera } from "@/lib/padron/requiere-carrera";
+import { normalizarLetraGrupo } from "@/lib/orientador/cargas-helpers";
+import { TIPOS_DOCUMENTO } from "@/lib/nombre-archivo";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -23,6 +25,12 @@ type FilaPadron = {
 	grupo_tokens: { grado: string | number; grupo: string } | null;
 	institucion_grupos: { grado: string | number; grupo: string } | null;
 	cuentas_alumno: { id: string }[] | { id: string } | null;
+};
+
+type FilaEntregaMin = {
+	cuenta_id: string;
+	tipo_documento: string;
+	estado?: string | null;
 };
 
 function limpiarNombreCompleto(v: unknown): string {
@@ -97,6 +105,41 @@ export async function GET(request: Request) {
 		}
 
 		const filas = (filasRaw ?? []) as unknown as FilaPadron[];
+		const cuentaIds = filas
+			.map((f) => cuentaIdDesdePadron(f.cuentas_alumno))
+			.filter((x): x is string => typeof x === "string" && x.trim() !== "");
+		const docsBasePorCuenta = new Map<string, number>();
+		const cuentaConRechazo = new Set<string>();
+		const cuentaConAceptado = new Set<string>();
+		if (cuentaIds.length > 0) {
+			const { data: entregas } = await supabase
+				.from("entregas_documento_alumno")
+				.select("cuenta_id, tipo_documento, estado")
+				.in("cuenta_id", cuentaIds)
+				.in("tipo_documento", Object.keys(TIPOS_DOCUMENTO));
+			const filasEnt = (entregas ?? []) as unknown as FilaEntregaMin[];
+			const uniqPorCuenta = new Map<string, Set<string>>();
+			for (const e of filasEnt) {
+				const cid = String(e.cuenta_id ?? "").trim();
+				const tipo = String(e.tipo_documento ?? "").trim();
+				if (!cid || !tipo) {
+					continue;
+				}
+				const s = uniqPorCuenta.get(cid) ?? new Set<string>();
+				s.add(tipo);
+				uniqPorCuenta.set(cid, s);
+				if (String(e.estado ?? "").trim().toLowerCase() === "rechazado") {
+					cuentaConRechazo.add(cid);
+				}
+				if (String(e.estado ?? "").trim().toLowerCase() === "validado") {
+					cuentaConAceptado.add(cid);
+				}
+			}
+			for (const [cid, set] of uniqPorCuenta.entries()) {
+				docsBasePorCuenta.set(cid, set.size);
+			}
+		}
+		const totalDocsBase = Object.keys(TIPOS_DOCUMENTO).length;
 		const idsCarrera = [
 			...new Set(filas.map((f) => f.carrera_id).filter((x): x is string => typeof x === "string" && x !== "")),
 		];
@@ -137,6 +180,8 @@ export async function GET(request: Request) {
 					f.institucion_grupo_id != null && String(f.institucion_grupo_id).trim() !== ""
 						? String(f.institucion_grupo_id)
 						: null;
+				const cuentaId = cuentaIdDesdePadron(f.cuentas_alumno);
+				const documentosBaseSubidos = cuentaId ? (docsBasePorCuenta.get(cuentaId) ?? 0) : 0;
 				return {
 					padronId: f.id,
 					nombreCompleto: f.nombre_completo,
@@ -149,7 +194,12 @@ export async function GET(request: Request) {
 					carreraNombre: carrera?.nombre ?? "",
 					carreraCodigo: carrera?.codigo ?? "",
 					estado: f.archivo_muerto_en ? "inactivo" : "activo",
-					cuentaId: cuentaIdDesdePadron(f.cuentas_alumno),
+					cuentaId,
+					documentosBaseSubidos,
+					documentosBaseTotales: totalDocsBase,
+					expedienteCompleto: documentosBaseSubidos >= totalDocsBase && totalDocsBase > 0,
+					tieneDocumentoRechazado: cuentaId ? cuentaConRechazo.has(cuentaId) : false,
+					tieneDocumentoAceptado: cuentaId ? cuentaConAceptado.has(cuentaId) : false,
 				};
 			})
 			.filter((a) => (grado ? a.grado === grado : true))
@@ -175,6 +225,7 @@ export async function POST(request: Request) {
 		gradoAlumno?: string | null;
 		carreraId?: string | null;
 		matricula?: string | null;
+		cargaAlumnosId?: string | null;
 	};
 	try {
 		cuerpo = (await request.json()) as {
@@ -183,6 +234,7 @@ export async function POST(request: Request) {
 			gradoAlumno?: string | null;
 			carreraId?: string | null;
 			matricula?: string | null;
+			cargaAlumnosId?: string | null;
 		};
 	} catch {
 		return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
@@ -296,6 +348,66 @@ export async function POST(request: Request) {
 			return NextResponse.json({ error: "Carrera no válida" }, { status: 400 });
 		}
 
+		if (!institucionGrupoDestino) {
+			return NextResponse.json({ error: "Grupo destino sin sección institucional" }, { status: 400 });
+		}
+		const { data: igSeccion } = await supabase
+			.from("institucion_grupos")
+			.select("grupo")
+			.eq("id", institucionGrupoDestino)
+			.maybeSingle();
+		const letraAlumno = normalizarLetraGrupo(String(igSeccion?.grupo ?? ""));
+		if (!letraAlumno) {
+			return NextResponse.json({ error: "No se pudo resolver la letra de grupo" }, { status: 400 });
+		}
+
+		let cargaInscripcionId: string | null = null;
+		if (!requiereCarrera) {
+			const rawCarga =
+				typeof cuerpo.cargaAlumnosId === "string" ? cuerpo.cargaAlumnosId.trim() : "";
+			if (!rawCarga) {
+				return NextResponse.json(
+					{
+						error:
+							"En 1.° grado elige el plazo de inscripción (fecha de cierre de la carga) para asociar al alumno solo a ese periodo.",
+					},
+					{ status: 400 },
+				);
+			}
+			const { data: cargaRow, error: errCarga } = await supabase
+				.from("cargas_alumnos")
+				.select("id, orientador_id, grado_carga, grupos_letras")
+				.eq("id", rawCarga)
+				.maybeSingle();
+			if (errCarga || !cargaRow) {
+				return NextResponse.json({ error: "La carga indicada no existe" }, { status: 400 });
+			}
+			if ((cargaRow.orientador_id as string) !== orientador.orientadorId) {
+				return NextResponse.json({ error: "No autorizado para esa carga" }, { status: 403 });
+			}
+			const gCarga = Number(cargaRow.grado_carga);
+			const gTok = Number.parseInt(String(gradoTok).trim(), 10) || 0;
+			if (gCarga !== gTok) {
+				return NextResponse.json(
+					{ error: "El grado de la carga no coincide con el grupo escolar del alumno" },
+					{ status: 400 },
+				);
+			}
+			const letrasPermitidas = ((cargaRow.grupos_letras as string[]) ?? []).map((x) =>
+				normalizarLetraGrupo(String(x)),
+			);
+			if (!letrasPermitidas.includes(letraAlumno)) {
+				return NextResponse.json(
+					{
+						error:
+							"Esa carga no incluye la letra de grupo del alumno; elige otra fecha de cierre o amplía los grupos de la carga.",
+					},
+					{ status: 400 },
+				);
+			}
+			cargaInscripcionId = rawCarga;
+		}
+
 		let carreraInsert: string | null;
 		let matriculaInsert: string | null;
 		if (!requiereCarrera) {
@@ -335,9 +447,37 @@ export async function POST(request: Request) {
 			return NextResponse.json({ error: "No se pudo crear el expediente" }, { status: 500 });
 		}
 
+		const padronNuevoId = insertada.id as string;
+
+		if (cargaInscripcionId) {
+			const { error: errLinea } = await supabase.from("carga_alumnos_linea").insert({
+				carga_id: cargaInscripcionId,
+				grupo_letra: letraAlumno,
+				nombre_completo: nombre,
+				padron_id: padronNuevoId,
+			});
+			if (errLinea) {
+				await supabase.from("padron_alumnos").delete().eq("id", padronNuevoId);
+				if (errLinea.code === "23505") {
+					return NextResponse.json(
+						{
+							error:
+								"Ese nombre ya está en la lista de esa carga y fecha de cierre; elige otro plazo o revisa duplicados.",
+						},
+						{ status: 409 },
+					);
+				}
+				console.error("orientador expediente POST linea carga", errLinea);
+				return NextResponse.json(
+					{ error: "No se pudo vincular el alumno al plazo de carga" },
+					{ status: 500 },
+				);
+			}
+		}
+
 		return NextResponse.json({
 			ok: true,
-			padronId: insertada.id as string,
+			padronId: padronNuevoId,
 			nombreCompleto: nombre,
 		});
 	} catch (e) {

@@ -38,11 +38,22 @@ where
 	and trim(gt.grado) = ig.grado::text
 	and upper(trim(gt.grupo)) = upper(ig.grupo);
 
--- Plantilla: grados 1–6 con grupos A–E (ajusta letras si tu escuela usa otras).
+-- Plantilla: grados 1–6 con grupos A–K (ajusta letras si tu escuela usa otras).
 insert into public.institucion_grupos (grado, grupo)
 select g.n, upper(trim(l.x))
 from generate_series(1, 6) as g(n)
 cross join (
-	values ('A'), ('B'), ('C'), ('D'), ('E')
+	values
+		('A'),
+		('B'),
+		('C'),
+		('D'),
+		('E'),
+		('F'),
+		('G'),
+		('H'),
+		('I'),
+		('J'),
+		('K')
 ) as l(x)
 on conflict (grado, grupo) do nothing;

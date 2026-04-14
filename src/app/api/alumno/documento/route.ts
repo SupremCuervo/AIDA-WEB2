@@ -8,6 +8,7 @@ import {
 } from "@/lib/alumno/requiere-grupo-vigente";
 import { jsonAlumnoArchivoMuertoCierraSesion, padronEstaArchivado } from "@/lib/padron/archivo-muerto";
 import { esTipoDocumentoValido, type TipoDocumentoClave } from "@/lib/nombre-archivo";
+import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -43,8 +44,8 @@ export async function DELETE(request: Request) {
 
 		const { error } = await eliminarEntregaPorCuentaYTipo(supabase, bucket, p.cuentaId, tipo);
 		if (error) {
-			const msg = error.message;
-			if (msg.includes("No hay entrega")) {
+			const msg = mensajeCausaParaUsuario(error);
+			if (msg.includes("No hay entrega") || msg.includes("No hay archivo")) {
 				return NextResponse.json({ error: "No hay archivo para eliminar" }, { status: 404 });
 			}
 			return NextResponse.json({ error: msg }, { status: 500 });

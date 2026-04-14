@@ -3,7 +3,8 @@ import { resolverBaseUrlOcrServidor, timeoutMsOcrServidor } from "@/lib/ocr/conf
 import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
 
 export const runtime = "nodejs";
-export const maxDuration = 90;
+/** Debe ser ≥ timeoutMsOcrServidor() o el proxy cortará antes que el fetch al OCR. */
+export const maxDuration = 300;
 
 export async function POST(request: Request) {
 	const orientador = await obtenerPayloadOrientador();

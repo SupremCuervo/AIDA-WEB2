@@ -56,15 +56,17 @@ where c.orientador_id = o.id
 	and c.grado_carga = 1
 	and c.grupos_letras = array['A', 'B', 'C', 'D', 'E']::text[];
 
-insert into public.orientadores (email, password_hash, nombre)
+insert into public.orientadores (email, password_hash, nombre, rol_panel)
 values (
 	'orientador@cecyteh.edu.mx',
 	'$2a$10$Yn.eSOBX1K7w56cAg3pfI.HctE1aLU7cT6GKRLyr05r2jMY/4O1K.',
-	'Orientador Demo CECyTEH'
+	'Orientador Demo CECyTEH',
+	'jefe'
 )
 on conflict (email) do update set
 	password_hash = excluded.password_hash,
-	nombre = excluded.nombre;
+	nombre = excluded.nombre,
+	rol_panel = excluded.rol_panel;
 
 -- Tokens demo por sección 1.° A–E (una fila por institucion_grupo_id)
 update public.grupo_tokens gt

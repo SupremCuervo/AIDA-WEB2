@@ -422,7 +422,13 @@ export default function OrientadorGrupoAlumnosPage() {
 			try {
 				const r = await fetch("/api/orientador/grupos", { credentials: "include" });
 				const d = (await r.json()) as {
-					grupos?: { id: string | null; grado: string; grupo: string; claveAcceso: string }[];
+					grupos?: {
+						id: string | null;
+						institucionGrupoId: string | null;
+						grado: string;
+						grupo: string;
+						claveAcceso: string;
+					}[];
 				};
 				setOpcionesGrupos(
 					(d.grupos ?? [])

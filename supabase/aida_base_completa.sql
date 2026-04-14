@@ -677,13 +677,24 @@ comment on table public.periodo_institucion_grupos is
 	'Secciones del catálogo asignadas al ciclo de semestre (orientador_semestre_fechas.id).';
 
 -- -----------------------------------------------------------------------------
--- Datos iniciales opcionales: plantilla de secciones A–E por grado (ajusta si hace falta)
+-- Datos iniciales opcionales: plantilla de secciones A–K por grado 1–6 (ajusta si hace falta)
 -- -----------------------------------------------------------------------------
 insert into public.institucion_grupos (grado, grupo)
 select g.n, upper(trim(l.x))
 from generate_series(1, 6) as g(n)
 cross join (
-	values ('A'), ('B'), ('C'), ('D'), ('E')
+	values
+		('A'),
+		('B'),
+		('C'),
+		('D'),
+		('E'),
+		('F'),
+		('G'),
+		('H'),
+		('I'),
+		('J'),
+		('K')
 ) as l(x)
 on conflict (grado, grupo) do nothing;
 

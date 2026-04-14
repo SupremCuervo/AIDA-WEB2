@@ -1,3 +1,4 @@
+import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import type { TipoDocumentoClave } from "@/lib/nombre-archivo";
 import type { CampoOcrCelda } from "@/lib/ocr/campos-ocr-vista";
 import { resolverBaseUrlOcrServidor, timeoutMsOcrServidor } from "@/lib/ocr/config-servidor";
@@ -70,8 +71,8 @@ async function ocrPreparar(
 ): Promise<Buffer> {
 	const fd = new FormData();
 	fd.append("file", new Blob([bytes], { type: contentType }), nombreArchivo);
-	fd.append("binarizar", "true");
-	fd.append("corregir_perspectiva", "false");
+	fd.append("binarizar", "false");
+	fd.append("aplicar_saturacion_hsv", "true");
 	const controller = new AbortController();
 	const t = setTimeout(() => controller.abort(), timeoutMsOcrServidor());
 	try {
@@ -102,6 +103,8 @@ async function ocrExtract(
 	fd.append("tramite", tramite);
 	fd.append("lang", "spa");
 	fd.append("use_ocr_space_fallback", "true");
+	fd.append("aplicar_preproceso_ocr", "true");
+	fd.append("aplicar_saturacion_hsv", "true");
 	const controller = new AbortController();
 	const t = setTimeout(() => controller.abort(), timeoutMsOcrServidor());
 	try {
@@ -167,7 +170,7 @@ export async function extraerCamposOcrServidor(
 			nombreEnvio = "pagina1.jpg";
 			mimeEnvio = "image/jpeg";
 		} catch (e) {
-			const msg = e instanceof Error ? e.message : "prepare_fallo";
+			const msg = mensajeCausaParaUsuario(e);
 			return { ok: false, error: msg.slice(0, 500), tramite };
 		}
 	}

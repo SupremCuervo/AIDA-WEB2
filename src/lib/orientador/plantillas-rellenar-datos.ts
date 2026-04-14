@@ -1,5 +1,9 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import type { CampoPlantillaRelleno, ValoresRellenoAlumno } from "@/lib/orientador/plantilla-definicion-relleno";
+import {
+	PLANTILLA_FUENTE_PT_DEFECTO,
+	type CampoPlantillaRelleno,
+	type ValoresRellenoAlumno,
+} from "@/lib/orientador/plantilla-definicion-relleno";
 
 function truncarLinea(texto: string, maxChars: number): string {
 	const t = texto.trim();
@@ -37,7 +41,10 @@ export async function rellenarPdfConValores(
 
 		for (const c of lista) {
 			const textoBruto = valores[c.clave] ?? "";
-			const fontSize = c.fontSizePt;
+			const fontSize = Math.max(
+				6,
+				Math.min(Number(c.fontSizePt) || PLANTILLA_FUENTE_PT_DEFECTO, 48),
+			);
 			const lineHeight = fontSize * 1.25;
 			const maxChars = Math.max(12, Math.floor((W * 0.92) / (fontSize * 0.55)));
 			const texto = truncarLinea(textoBruto, maxChars);

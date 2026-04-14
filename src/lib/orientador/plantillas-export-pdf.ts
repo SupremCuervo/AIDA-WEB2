@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PLANTILLA_FUENTE_PT_DEFECTO } from "@/lib/orientador/plantilla-definicion-relleno";
 
 export type AnotacionExport = {
 	pageIndex: number;
@@ -6,7 +7,10 @@ export type AnotacionExport = {
 	yPct: number;
 	text: string;
 	colorHex: string;
+	/** Si true, rectángulo blanco y borde gris detrás del texto (impresión más “formulario”). */
 	fondo: boolean;
+	/** Tamaño en puntos tipográficos; alineado con `CampoPlantillaRelleno.fontSizePt`. */
+	fontSizePt?: number;
 };
 
 function hexARgb01(hex: string): { r: number; g: number; b: number } {
@@ -39,10 +43,13 @@ export async function exportarPdfConAnotaciones(
 			continue;
 		}
 		const { width: W, height: H } = page.getSize();
-		const fontSize = 11;
-		const lineHeight = fontSize * 1.25;
 
 		for (const a of lista) {
+			const fontSize = Math.max(
+				6,
+				Math.min(Number(a.fontSizePt) || PLANTILLA_FUENTE_PT_DEFECTO, 48),
+			);
+			const lineHeight = fontSize * 1.25;
 			const texto = a.text.trim() === "" ? " " : a.text;
 			const lineas = texto.split("\n");
 			const col = hexARgb01(a.colorHex);

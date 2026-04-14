@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import {
 	esTipoDocumentoValido,
 	nombreArchivoEstandar,
@@ -52,7 +53,10 @@ export async function POST(request: Request) {
 			extension: resultado.extension,
 		});
 	} catch (e) {
-		const mensaje = e instanceof Error ? e.message : "Error al generar nombre";
-		return NextResponse.json({ error: mensaje }, { status: 400 });
+		const mensaje = mensajeCausaParaUsuario(e);
+		return NextResponse.json(
+			{ error: mensaje === "Ocurrió un error inesperado." ? "Error al generar nombre" : mensaje },
+			{ status: 400 },
+		);
 	}
 }

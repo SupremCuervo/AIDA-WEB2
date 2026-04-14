@@ -10,10 +10,13 @@ function normalizarBase(u: string): string {
 	return u.trim().replace(/\/$/, "");
 }
 
+/** Por defecto 4 min: cold start + OCR.space / Tesseract en hosts lentos. */
+const OCR_TIMEOUT_MS_DEFAULT = 240_000;
+
 export function timeoutMsOcrServidor(): number {
 	const raw = process.env.AIDA_OCR_TIMEOUT_MS?.trim();
 	const n = raw ? Number.parseInt(raw, 10) : Number.NaN;
-	return Number.isFinite(n) && n > 5_000 ? n : 90_000;
+	return Number.isFinite(n) && n > 5_000 ? n : OCR_TIMEOUT_MS_DEFAULT;
 }
 
 /**

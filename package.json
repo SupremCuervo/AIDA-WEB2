@@ -7,15 +7,17 @@
 		"build": "next build",
 		"start": "next start",
 		"test": "vitest run",
-		"test:watch": "vitest"
+		"test:watch": "vitest",
+		"deploy:function:aida-data": "npx --yes supabase@2.84.2 functions deploy aida-data --no-verify-jwt --use-api",
+		"deploy:function:aida-data:docker": "npx --yes supabase@2.84.2 functions deploy aida-data --no-verify-jwt"
 	},
 	"dependencies": {
 		"@supabase/supabase-js": "2.49.4",
 		"bcryptjs": "2.4.3",
 		"jose": "5.9.6",
 		"jszip": "^3.10.1",
-		"next": "15.2.4",
-		"pdf-lib": "^1.17.1",
+		"next": "15.5.15",
+		"pdf-lib": "1.17.1",
 		"pdfjs-dist": "^4.8.69",
 		"react": "19.0.0",
 		"react-dom": "19.0.0"

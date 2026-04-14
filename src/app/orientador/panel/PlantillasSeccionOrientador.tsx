@@ -17,6 +17,8 @@ export default function PlantillasSeccionOrientador() {
 	const [previewId, setPreviewId] = useState<string | null>(null);
 	const [usarId, setUsarId] = useState<string | null>(null);
 	const [usarTitulo, setUsarTitulo] = useState("");
+	const [plantillaEliminar, setPlantillaEliminar] = useState<FilaPlantilla | null>(null);
+	const [eliminandoPlantilla, setEliminandoPlantilla] = useState(false);
 
 	const cargar = useCallback(async () => {
 		setCargando(true);
@@ -42,18 +44,40 @@ export default function PlantillasSeccionOrientador() {
 		void cargar();
 	}, [cargar]);
 
+	const eliminarPlantilla = useCallback(async () => {
+		if (!plantillaEliminar) {
+			return;
+		}
+		setEliminandoPlantilla(true);
+		setError("");
+		try {
+			const res = await fetch(`/api/orientador/plantillas/${plantillaEliminar.id}`, {
+				method: "DELETE",
+				credentials: "include",
+			});
+			const j = (await res.json()) as { error?: string };
+			if (!res.ok) {
+				setError(j.error ?? "No se pudo eliminar la plantilla");
+				return;
+			}
+			setPlantillaEliminar(null);
+			await cargar();
+		} catch {
+			setError("Error de red");
+		} finally {
+			setEliminandoPlantilla(false);
+		}
+	}, [plantillaEliminar, cargar]);
+
 	return (
-		<div className="mx-auto mt-5 max-w-6xl px-4 sm:px-6">
-			<h2 className="mb-6 text-center text-2xl font-bold tracking-tight text-[#111827] sm:text-3xl">
-				Plantillas
-			</h2>
+		<div className="mx-auto mt-5 w-full max-w-none">
 			{cargando ? (
 				<p className="text-center text-sm text-slate-600">Cargando…</p>
 			) : error ? (
 				<p className="text-center text-sm text-red-600">{error}</p>
 			) : lista.length === 0 ? (
 				<p className="rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center text-sm text-slate-500">
-					No hay plantillas guardadas. Crea una desde la sección Escaner.
+					No hay plantillas guardadas.
 				</p>
 			) : (
 				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -66,22 +90,16 @@ export default function PlantillasSeccionOrientador() {
 							<button
 								type="button"
 								onClick={() => setPreviewId(p.id)}
-								className="mt-3 flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-slate-100 bg-slate-50 py-8 text-slate-600 transition hover:bg-slate-100"
+								className="mt-3 flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-slate-100 bg-slate-50 p-2 text-slate-600 transition hover:bg-slate-100"
 							>
-								<svg className="h-14 w-11 text-slate-800" fill="none" viewBox="0 0 24 32" aria-hidden>
-									<path
-										fill="currentColor"
-										fillOpacity="0.08"
-										stroke="currentColor"
-										strokeWidth="1.2"
-										d="M4 2h10l6 6v20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"
+								<div className="h-36 w-full overflow-hidden rounded-lg border border-slate-200 bg-white">
+									<iframe
+										title={`Vista previa ${p.titulo}`}
+										src={`/api/orientador/plantillas/${p.id}/pdf`}
+										className="h-full w-full border-0"
 									/>
-									<path stroke="currentColor" strokeWidth="1" d="M14 2v8h8" />
-									<path stroke="currentColor" strokeWidth="0.8" d="M6 18h12M6 22h10M6 14h8" />
-								</svg>
-								<span className="text-[10px] font-medium uppercase tracking-wide text-slate-500 [writing-mode:vertical-rl] rotate-180">
-									Vista previa
-								</span>
+								</div>
+								<span className="text-xs font-medium uppercase tracking-wide text-slate-500">Vista previa</span>
 							</button>
 							<button
 								type="button"
@@ -89,9 +107,16 @@ export default function PlantillasSeccionOrientador() {
 									setUsarTitulo(p.titulo);
 									setUsarId(p.id);
 								}}
-								className="mt-3 w-full rounded-xl bg-slate-200 py-2.5 text-sm font-semibold text-slate-900 hover:bg-slate-300"
+								className="mt-3 w-full rounded-xl border border-[#7C3AED] bg-[#EDE9FE] py-2.5 text-sm font-semibold text-[#5B21B6] hover:bg-[#DDD6FE]"
 							>
 								Ocupar
+							</button>
+							<button
+								type="button"
+								onClick={() => setPlantillaEliminar(p)}
+								className="mt-2 w-full rounded-xl border border-red-300 bg-red-100 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-200"
+							>
+								Eliminar
 							</button>
 						</article>
 					))}
@@ -134,6 +159,38 @@ export default function PlantillasSeccionOrientador() {
 					onCerrar={() => setUsarId(null)}
 					onDefinicionActualizada={() => void cargar()}
 				/>
+			) : null}
+
+			{plantillaEliminar ? (
+				<div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/45 p-4">
+					<div className="w-full max-w-md rounded-2xl border border-[#C4B5FD] bg-white p-6 shadow-2xl">
+						<h3 className="text-center text-lg font-bold text-slate-900">Eliminar plantilla</h3>
+						<p className="mt-3 text-center text-sm text-slate-700">
+							¿Seguro que lo quieres eliminar?
+						</p>
+						<p className="mt-1 text-center text-sm font-semibold text-slate-900">
+							{plantillaEliminar.titulo}
+						</p>
+						<div className="mt-5 flex items-center justify-center gap-3">
+							<button
+								type="button"
+								disabled={eliminandoPlantilla}
+								onClick={() => setPlantillaEliminar(null)}
+								className="rounded-xl border-2 border-[#93C5FD] bg-[#DBEAFE] px-5 py-2 text-sm font-semibold text-[#1E40AF] transition hover:bg-[#BFDBFE] disabled:opacity-50"
+							>
+								Cancelar
+							</button>
+							<button
+								type="button"
+								disabled={eliminandoPlantilla}
+								onClick={() => void eliminarPlantilla()}
+								className="rounded-xl border-2 border-[#C4B5FD] bg-[#EDE9FE] px-5 py-2 text-sm font-semibold text-[#5B21B6] transition hover:bg-[#DDD6FE] disabled:opacity-50"
+							>
+								{eliminandoPlantilla ? "Eliminando…" : "Eliminar"}
+							</button>
+						</div>
+					</div>
+				</div>
 			) : null}
 		</div>
 	);

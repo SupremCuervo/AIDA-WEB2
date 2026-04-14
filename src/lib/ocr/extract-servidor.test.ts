@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tramiteOcrDesdeTipoDocumento } from "./extract-servidor";
 
+const envTest = process.env as Record<string, string | undefined>;
+
 describe("extract-servidor (contrato OCR — base para OCR-01 a OCR-07)", () => {
 	const fetchMock = vi.fn();
 	const inicial = {
@@ -14,7 +16,11 @@ describe("extract-servidor (contrato OCR — base para OCR-01 a OCR-07)", () => 
 		else delete process.env.AIDA_OCR_API_BASE_URL;
 		if (inicial.DEMO !== undefined) process.env.AIDA_OCR_USE_RENDER_DEMO = inicial.DEMO;
 		else delete process.env.AIDA_OCR_USE_RENDER_DEMO;
-		if (inicial.NODE !== undefined) process.env.NODE_ENV = inicial.NODE;
+		if (inicial.NODE !== undefined) {
+			envTest.NODE_ENV = inicial.NODE;
+		} else {
+			delete envTest.NODE_ENV;
+		}
 		vi.stubGlobal("fetch", fetchMock);
 		fetchMock.mockReset();
 	});
@@ -32,12 +38,14 @@ describe("extract-servidor (contrato OCR — base para OCR-01 a OCR-07)", () => 
 	it("sin URL configurada ni demo: ocr_no_configurado", async () => {
 		delete process.env.AIDA_OCR_API_BASE_URL;
 		delete process.env.AIDA_OCR_USE_RENDER_DEMO;
-		process.env.NODE_ENV = "production";
+		envTest.NODE_ENV = "production";
 		const { extraerCamposOcrServidor: extraer } = await import("./extract-servidor");
 		const buf = Buffer.from("fake-image");
 		const r = await extraer(buf, "x.jpg", "image/jpeg", "curp");
 		expect(r.ok).toBe(false);
-		expect(r.error).toBe("ocr_no_configurado");
+		if (!r.ok) {
+			expect(r.error).toBe("ocr_no_configurado");
+		}
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
@@ -79,7 +87,9 @@ describe("extract-servidor (contrato OCR — base para OCR-01 a OCR-07)", () => 
 		);
 		const r = await extraer(Buffer.from("x"), "a.jpg", "image/jpeg", "curp");
 		expect(r.ok).toBe(false);
-		expect(r.error.length).toBeGreaterThan(0);
+		if (!r.ok) {
+			expect(r.error.length).toBeGreaterThan(0);
+		}
 	});
 
 	it("PDF: prepare + extract", async () => {

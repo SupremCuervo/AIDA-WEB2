@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { obtenerBucketPlantillas } from "@/lib/orientador/plantillas-bucket";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
+import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
 
 export const runtime = "nodejs";
@@ -55,7 +56,6 @@ export async function GET(
 		});
 	} catch (e) {
 		console.error("plantilla pdf", e);
-		const msg = e instanceof Error ? e.message : "Error del servidor";
-		return NextResponse.json({ error: msg }, { status: 500 });
+		return NextResponse.json({ error: mensajeCausaParaUsuario(e) }, { status: 500 });
 	}
 }

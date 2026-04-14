@@ -5,52 +5,107 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import {
 	CLAVES_DATO_ALUMNO,
 	etiquetaClave,
+	PLANTILLA_FUENTE_FAMILIA_CSS,
+	PLANTILLA_FUENTE_PT_DEFECTO,
 	type CampoPlantillaRelleno,
 	type ClaveDatoAlumno,
 } from "@/lib/orientador/plantilla-definicion-relleno";
+import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import { exportarPdfConAnotaciones } from "@/lib/orientador/plantillas-export-pdf";
+
+const ZOOM_BASE_CAMPO = 1.35;
 
 function PaginaRelleno({
 	pdf,
 	pageIndex,
+	zoom,
 	campos,
 	valores,
+	seleccionCampoId,
 	onValor,
+	onSelectCampo,
+	onEliminarCampo,
+	onMoverCampo,
 }: {
 	pdf: PDFDocumentProxy;
 	pageIndex: number;
+	zoom: number;
 	campos: CampoPlantillaRelleno[];
 	valores: Record<string, string>;
+	seleccionCampoId: string | null;
 	onValor: (id: string, v: string) => void;
+	onSelectCampo: (id: string | null) => void;
+	onEliminarCampo: (id: string) => void;
+	onMoverCampo: (id: string, xPct: number, yPct: number) => void;
 }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const wrapRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
-		let cancel = false;
+		let cancelled = false;
+		let renderTask: { cancel: () => void; promise: Promise<void> } | null = null;
 		const canvas = canvasRef.current;
 		if (!canvas) {
 			return;
 		}
 		(async () => {
-			const page = await pdf.getPage(pageIndex + 1);
-			if (cancel) {
-				return;
+			try {
+				const page = await pdf.getPage(pageIndex + 1);
+				if (cancelled) {
+					return;
+				}
+				const ctx = canvas.getContext("2d");
+				if (!ctx) {
+					return;
+				}
+				const scale = zoom;
+				const viewport = page.getViewport({ scale });
+				canvas.width = viewport.width;
+				canvas.height = viewport.height;
+				if (cancelled) {
+					return;
+				}
+				renderTask = page.render({ canvasContext: ctx, viewport });
+				await renderTask.promise;
+			} catch {
+				/* render cancelado o canvas liberado */
 			}
-			const ctx = canvas.getContext("2d");
-			if (!ctx) {
-				return;
-			}
-			const scale = 1.15;
-			const viewport = page.getViewport({ scale });
-			canvas.width = viewport.width;
-			canvas.height = viewport.height;
-			await page.render({ canvasContext: ctx, viewport }).promise;
 		})();
 		return () => {
-			cancel = true;
+			cancelled = true;
+			renderTask?.cancel();
 		};
-	}, [pdf, pageIndex]);
+	}, [pdf, pageIndex, zoom]);
+
+	const iniciarArrastre = useCallback(
+		(c: CampoPlantillaRelleno, ev: React.PointerEvent) => {
+			ev.preventDefault();
+			ev.stopPropagation();
+			onSelectCampo(c.id);
+			const wrap = wrapRef.current;
+			if (!wrap) {
+				return;
+			}
+			const startX = ev.clientX;
+			const startY = ev.clientY;
+			const { xPct: ox, yPct: oy } = c;
+			const onMove = (e: PointerEvent) => {
+				const r = wrap.getBoundingClientRect();
+				const dxPct = ((e.clientX - startX) / r.width) * 100;
+				const dyPct = ((e.clientY - startY) / r.height) * 100;
+				onMoverCampo(c.id, Math.min(100, Math.max(0, ox + dxPct)), Math.min(100, Math.max(0, oy + dyPct)));
+			};
+			const onUp = () => {
+				window.removeEventListener("pointermove", onMove);
+				window.removeEventListener("pointerup", onUp);
+				window.removeEventListener("pointercancel", onUp);
+			};
+			window.addEventListener("pointermove", onMove);
+			window.addEventListener("pointerup", onUp);
+			window.addEventListener("pointercancel", onUp);
+		},
+		[onMoverCampo, onSelectCampo],
+	);
 
 	const dePagina = campos.filter((c) => c.pageIndex === pageIndex);
 
@@ -58,27 +113,75 @@ function PaginaRelleno({
 		<div className="flex shrink-0 flex-col items-center">
 			<div
 				ref={wrapRef}
-				className="relative inline-block max-w-[min(100%,320px)] overflow-hidden rounded-lg border border-slate-200 bg-white shadow"
+				className="relative inline-block max-w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow"
 			>
 				<canvas ref={canvasRef} className="block max-w-full" />
-				{dePagina.map((c) => (
-					<input
-						key={c.id}
-						type="text"
-						value={valores[c.id] ?? ""}
-						onChange={(e) => onValor(c.id, e.target.value)}
-						className="absolute z-[2] min-w-[4rem] rounded border border-slate-400 bg-white/95 px-1 py-0.5 text-xs text-slate-900 shadow-sm outline-none focus:ring-1 focus:ring-violet-500"
-						style={{
-							left: `${c.xPct}%`,
-							top: `${c.yPct}%`,
-							transform: "translate(-2px, -2px)",
-							width: "min(85%, 14rem)",
-							fontSize: `${Math.max(9, Math.min(c.fontSizePt, 14))}px`,
-						}}
-						placeholder={etiquetaClave(c.clave)}
-						aria-label={etiquetaClave(c.clave)}
-					/>
-				))}
+				{dePagina.map((c) => {
+					const fs = Math.max(6, Math.min(c.fontSizePt, 48));
+					return (
+						<div
+							key={c.id}
+							className={`absolute z-[2] flex max-w-[min(92%,18rem)] items-center gap-0.5 ${
+								seleccionCampoId === c.id ? "rounded-sm ring-1 ring-violet-500/70" : ""
+							}`}
+							style={{
+								left: `${c.xPct}%`,
+								top: `${c.yPct}%`,
+								transform: `scale(${ZOOM_BASE_CAMPO / zoom})`,
+								transformOrigin: "top left",
+							}}
+							onClick={(e) => {
+								e.stopPropagation();
+								onSelectCampo(c.id);
+							}}
+						>
+							<button
+								type="button"
+								className="shrink-0 cursor-grab touch-manipulation rounded p-0.5 text-slate-500 hover:bg-violet-200/40 active:cursor-grabbing"
+								aria-label="Mover campo"
+								title="Arrastrar"
+								onPointerDown={(ev) => iniciarArrastre(c, ev)}
+							>
+								<span className="select-none text-[11px] leading-none" aria-hidden>
+									⋮⋮
+								</span>
+							</button>
+							<textarea
+								value={valores[c.id] ?? ""}
+								onChange={(e) => onValor(c.id, e.target.value)}
+								rows={2}
+								className="min-h-[2.25em] min-w-[6rem] flex-1 resize-none border-0 bg-transparent px-0.5 py-0 text-slate-900 shadow-none outline-none ring-0 placeholder:text-slate-400/90 focus:ring-0"
+								style={{
+									fontSize: `${fs}px`,
+									lineHeight: 1.25,
+									fontFamily: PLANTILLA_FUENTE_FAMILIA_CSS,
+								}}
+								placeholder={etiquetaClave(c.clave)}
+								aria-label={etiquetaClave(c.clave)}
+								autoComplete="off"
+								onClick={(e) => {
+									e.stopPropagation();
+									onSelectCampo(c.id);
+								}}
+								onDoubleClick={(e) => {
+									e.currentTarget.select();
+								}}
+							/>
+							<button
+								type="button"
+								className="shrink-0 rounded p-0.5 text-red-600 hover:bg-red-50"
+								onClick={(ev) => {
+									ev.stopPropagation();
+									onEliminarCampo(c.id);
+								}}
+								aria-label="Eliminar campo"
+								title="Eliminar"
+							>
+								×
+							</button>
+						</div>
+					);
+				})}
 			</div>
 		</div>
 	);
@@ -109,6 +212,9 @@ export default function ModalRellenarPlantillaPanel({
 	const [exportando, setExportando] = useState(false);
 	const [claveNueva, setClaveNueva] = useState<ClaveDatoAlumno>("nombre_completo");
 	const [guardandoCampo, setGuardandoCampo] = useState(false);
+	const [guardandoCambios, setGuardandoCambios] = useState(false);
+	const [seleccionCampoId, setSeleccionCampoId] = useState<string | null>(null);
+	const [zoom, setZoom] = useState(ZOOM_BASE_CAMPO);
 
 	const cargar = useCallback(async () => {
 		if (!plantillaId) {
@@ -160,6 +266,8 @@ export default function ModalRellenarPlantillaPanel({
 			setNumPages(0);
 			setCampos([]);
 			setValores({});
+			setSeleccionCampoId(null);
+			setZoom(ZOOM_BASE_CAMPO);
 			pdfBytesRef.current = null;
 			setError("");
 			return;
@@ -200,7 +308,7 @@ export default function ModalRellenarPlantillaPanel({
 				pageIndex: 0,
 				xPct: 12,
 				yPct: 18,
-				fontSizePt: 11,
+				fontSizePt: PLANTILLA_FUENTE_PT_DEFECTO,
 				clave: claveNueva,
 			};
 			const nuevaLista = [...campos, nuevo];
@@ -209,11 +317,43 @@ export default function ModalRellenarPlantillaPanel({
 			setValores((prev) => ({ ...prev, [id]: "" }));
 			onDefinicionActualizada?.();
 		} catch (e) {
-			setError(e instanceof Error ? e.message : "Error al agregar campo");
+			setError(mensajeCausaParaUsuario(e) || "Error al agregar campo");
 		} finally {
 			setGuardandoCampo(false);
 		}
 	}, [pdf, numPages, campos, claveNueva, persistirDefinicion, onDefinicionActualizada]);
+
+	const moverCampo = useCallback((id: string, xPct: number, yPct: number) => {
+		setCampos((prev) => prev.map((c) => (c.id === id ? { ...c, xPct, yPct } : c)));
+	}, []);
+
+	const eliminarCampo = useCallback(
+		async (id: string) => {
+			const nuevaLista = campos.filter((c) => c.id !== id);
+			try {
+				await persistirDefinicion(nuevaLista);
+				setCampos(nuevaLista);
+				setSeleccionCampoId((s) => (s === id ? null : s));
+				onDefinicionActualizada?.();
+			} catch (e) {
+				setError(mensajeCausaParaUsuario(e) || "No se pudo eliminar el campo");
+			}
+		},
+		[campos, onDefinicionActualizada, persistirDefinicion],
+	);
+
+	const guardarCambiosPlantilla = useCallback(async () => {
+		setGuardandoCambios(true);
+		setError("");
+		try {
+			await persistirDefinicion(campos);
+			onDefinicionActualizada?.();
+		} catch (e) {
+			setError(mensajeCausaParaUsuario(e) || "No se pudo guardar");
+		} finally {
+			setGuardandoCambios(false);
+		}
+	}, [campos, onDefinicionActualizada, persistirDefinicion]);
 
 	const descargarPdf = useCallback(async () => {
 		const buf = pdfBytesRef.current;
@@ -230,7 +370,8 @@ export default function ModalRellenarPlantillaPanel({
 				yPct: c.yPct,
 				text: valores[c.id] ?? "",
 				colorHex: "#0f172a",
-				fondo: true,
+				fondo: false,
+				fontSizePt: c.fontSizePt,
 			}));
 			const out = await exportarPdfConAnotaciones(buf, anotaciones);
 			const blob = new Blob([out], { type: "application/pdf" });
@@ -260,7 +401,8 @@ export default function ModalRellenarPlantillaPanel({
 				yPct: c.yPct,
 				text: valores[c.id] ?? "",
 				colorHex: "#0f172a",
-				fondo: true,
+				fondo: false,
+				fontSizePt: c.fontSizePt,
 			}));
 			const out = await exportarPdfConAnotaciones(buf, anotaciones);
 			const blob = new Blob([out], { type: "application/pdf" });
@@ -312,24 +454,56 @@ export default function ModalRellenarPlantillaPanel({
 					<h2 id="titulo-relleno-plantilla" className="flex-1 text-center text-base font-bold text-slate-900">
 						{titulo}
 					</h2>
-					<span className="w-9" />
+					<button
+						type="button"
+						onClick={() => void guardarCambiosPlantilla()}
+						disabled={guardandoCambios || !pdf}
+						className="rounded-lg border border-emerald-600 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+					>
+						{guardandoCambios ? "Guardando…" : "Guardar"}
+					</button>
 				</div>
 
-				<div className="min-h-0 flex-1 overflow-x-auto overflow-y-auto p-4">
+				<div className="shrink-0 border-b border-slate-100 px-4 py-2">
+					<div className="flex items-center justify-end gap-2 text-sm">
+						<button
+							type="button"
+							onClick={() => setZoom((z) => Math.max(0.8, Number((z - 0.1).toFixed(2))))}
+							className="rounded-lg border border-slate-300 px-2 py-1 hover:bg-slate-50"
+						>
+							-
+						</button>
+						<span className="min-w-[4rem] text-center font-semibold text-slate-700">{Math.round(zoom * 100)}%</span>
+						<button
+							type="button"
+							onClick={() => setZoom((z) => Math.min(2.4, Number((z + 0.1).toFixed(2))))}
+							className="rounded-lg border border-slate-300 px-2 py-1 hover:bg-slate-50"
+						>
+							+
+						</button>
+					</div>
+				</div>
+
+				<div className="min-h-0 flex-1 overflow-y-auto p-4">
 					{cargando ? (
 						<p className="text-center text-sm text-slate-600">Cargando…</p>
 					) : error && !pdf ? (
 						<p className="text-center text-sm text-red-600">{error}</p>
 					) : pdf && numPages > 0 ? (
-						<div className="flex flex-row flex-nowrap gap-4">
+						<div className="space-y-4">
 							{Array.from({ length: numPages }, (_, i) => (
 								<PaginaRelleno
 									key={i}
 									pdf={pdf}
 									pageIndex={i}
+									zoom={zoom}
 									campos={campos}
 									valores={valores}
+									seleccionCampoId={seleccionCampoId}
 									onValor={onValor}
+									onSelectCampo={setSeleccionCampoId}
+									onEliminarCampo={(id) => void eliminarCampo(id)}
+									onMoverCampo={moverCampo}
 								/>
 							))}
 						</div>
@@ -358,9 +532,17 @@ export default function ModalRellenarPlantillaPanel({
 							type="button"
 							onClick={() => void agregarCampo()}
 							disabled={guardandoCampo || !pdf}
-							className="rounded-xl bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-300 disabled:opacity-50"
+							className="rounded-xl border border-[#3B82F6] bg-[#DBEAFE] px-4 py-2 text-sm font-semibold text-[#1D4ED8] hover:bg-[#BFDBFE] disabled:opacity-50"
 						>
 							{guardandoCampo ? "Guardando…" : "Agregar campo de texto"}
+						</button>
+						<button
+							type="button"
+							onClick={() => void guardarCambiosPlantilla()}
+							disabled={guardandoCampo || guardandoCambios || !pdf}
+							className="rounded-xl border border-emerald-600 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+						>
+							{guardandoCambios ? "Guardando…" : "Guardar"}
 						</button>
 					</div>
 					<div className="flex flex-col gap-2 sm:flex-row">
@@ -368,7 +550,7 @@ export default function ModalRellenarPlantillaPanel({
 							type="button"
 							onClick={() => void descargarPdf()}
 							disabled={exportando}
-							className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-600 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+							className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#3B82F6] bg-[#DBEAFE] py-3 text-sm font-semibold text-[#1D4ED8] hover:bg-[#BFDBFE] disabled:opacity-50"
 						>
 							Descargar en PDF
 						</button>
@@ -376,7 +558,7 @@ export default function ModalRellenarPlantillaPanel({
 							type="button"
 							onClick={() => void imprimir()}
 							disabled={exportando}
-							className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-600 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
+							className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-[#7C3AED] bg-[#EDE9FE] py-3 text-sm font-semibold text-[#5B21B6] hover:bg-[#DDD6FE] disabled:opacity-50"
 						>
 							Imprimir
 						</button>

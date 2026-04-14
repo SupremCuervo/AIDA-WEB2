@@ -20,23 +20,6 @@ function cuentaIdDesdePadron(
 	return typeof c.id === "string" ? c.id : null;
 }
 
-function aplicarFiltroPadronSeccion(
-	q: ReturnType<ReturnType<typeof obtenerClienteSupabaseAdmin>["from"]>,
-	resolucion: Awaited<ReturnType<typeof resolverGrupoSeccionPorId>> extends { ok: true; resolucion: infer R }
-		? R
-		: never,
-) {
-	if (resolucion.tipo === "solo_institucion") {
-		return q.eq("institucion_grupo_id", resolucion.institucionGrupoId);
-	}
-	if (resolucion.institucionGrupoId) {
-		return q.or(
-			`grupo_token_id.eq.${resolucion.grupoTokenId},institucion_grupo_id.eq.${resolucion.institucionGrupoId}`,
-		);
-	}
-	return q.eq("grupo_token_id", resolucion.grupoTokenId);
-}
-
 export async function GET(
 	_request: Request,
 	ctx: { params: Promise<{ grupoTokenId: string }> },
