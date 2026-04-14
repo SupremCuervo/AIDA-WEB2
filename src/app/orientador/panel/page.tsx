@@ -5,7 +5,6 @@ import { useSearchParams } from "next/navigation";
 import CargasPeriodosOrientador, { type ContextoModalTokensCargas } from "./CargasPeriodosOrientador";
 import EscolarSeccionOrientador from "./EscolarSeccionOrientador";
 import CrearTablaOrientador from "./CrearTablaOrientador";
-import EscanerSeccionOrientador from "./EscanerSeccionOrientador";
 import PlantillasSeccionOrientador from "./PlantillasSeccionOrientador";
 import HistorialAccionesOrientador from "./HistorialAccionesOrientador";
 import ModalAccionesMasivasGruposExpediente from "./ModalAccionesMasivasGruposExpediente";
@@ -50,7 +49,6 @@ type SeccionNuevaOrientador = SeccionOrientadorEnfoque;
 const SECCIONES_MENU_NUEVO: { id: SeccionNuevaOrientador; etiqueta: string }[] = [
 	{ id: "expediente", etiqueta: "Expediente" },
 	{ id: "crear_tabla", etiqueta: "Crear tabla" },
-	{ id: "escaner", etiqueta: "Escaner" },
 	{ id: "plantillas", etiqueta: "Plantillas" },
 	{ id: "cargas", etiqueta: "Cargas" },
 	{ id: "escolar", etiqueta: "Escolar" },
@@ -61,7 +59,6 @@ function esSeccionNuevaOrientador(v: string | null): v is SeccionNuevaOrientador
 	return (
 		v === "expediente" ||
 		v === "crear_tabla" ||
-		v === "escaner" ||
 		v === "plantillas" ||
 		v === "cargas" ||
 		v === "escolar" ||
@@ -374,8 +371,17 @@ export default function OrientadorPanelPage() {
 			}
 			return;
 		}
+		if (s === "escaner") {
+			setSeccionActiva("expediente");
+			if (typeof window !== "undefined") {
+				const url = new URL(window.location.href);
+				url.searchParams.set("seccion", "expediente");
+				window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+			}
+			return;
+		}
 		if (esSeccionNuevaOrientador(s)) {
-			if (rolPanel === "normal" && s === "historial") {
+			if (rolPanel === "normal" && (s === "historial" || s === "escolar")) {
 				setSeccionActiva("expediente");
 				if (typeof window !== "undefined") {
 					const url = new URL(window.location.href);
@@ -396,7 +402,7 @@ export default function OrientadorPanelPage() {
 		if (rolPanel === "jefe") {
 			return SECCIONES_MENU_NUEVO;
 		}
-		return SECCIONES_MENU_NUEVO.filter((s) => s.id !== "historial");
+		return SECCIONES_MENU_NUEVO.filter((s) => s.id !== "historial" && s.id !== "escolar");
 	}, [rolPanel]);
 
 	const irAExpediente = useCallback(() => {
@@ -2239,8 +2245,6 @@ export default function OrientadorPanelPage() {
 				</div>
 			) : seccionActiva === "crear_tabla" ? (
 				<CrearTablaOrientador />
-			) : seccionActiva === "escaner" ? (
-				<EscanerSeccionOrientador />
 			) : seccionActiva === "plantillas" ? (
 				<PlantillasSeccionOrientador />
 			) : seccionActiva === "cargas" ? (

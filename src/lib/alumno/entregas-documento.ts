@@ -11,10 +11,12 @@ export async function contarEntregasPorCuenta(
 	supabase: SupabaseClient,
 	cuentaId: string,
 ): Promise<number> {
+	const tiposObligatorios = Object.keys(TIPOS_DOCUMENTO);
 	const { data, error } = await supabase
 		.from(TABLA_ENTREGAS)
 		.select("tipo_documento")
-		.eq("cuenta_id", cuentaId);
+		.eq("cuenta_id", cuentaId)
+		.in("tipo_documento", tiposObligatorios);
 	if (error) {
 		console.error("contarEntregasPorCuenta", error);
 		return 0;

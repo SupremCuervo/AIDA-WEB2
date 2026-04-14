@@ -5,7 +5,6 @@ import { createContext, useCallback, useContext, useEffect, useRef, type ReactNo
 export type SeccionOrientadorEnfoque =
 	| "expediente"
 	| "crear_tabla"
-	| "escaner"
 	| "plantillas"
 	| "cargas"
 	| "escolar"
@@ -15,7 +14,6 @@ export type SeccionOrientadorEnfoque =
 export const ANCLA_SECCION = {
 	expediente: "sec-expediente",
 	crear_tabla: "sec-crear-tabla",
-	escaner: "sec-escaner",
 	plantillas: "sec-plantillas",
 	cargas: "sec-cargas",
 	escolar: "sec-escolar",

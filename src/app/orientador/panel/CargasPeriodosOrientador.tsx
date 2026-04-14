@@ -156,6 +156,7 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 	const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 	const [previewMime, setPreviewMime] = useState<string | null>(null);
 	const [previewTitulo, setPreviewTitulo] = useState("");
+	const [previewCargando, setPreviewCargando] = useState(false);
 
 	const [historialDetalle, setHistorialDetalle] = useState<{
 		carga: CargaListaItem;
@@ -194,8 +195,13 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 		clavesPorGrupo: Record<string, string>;
 	} | null>(null);
 	const [cargandoVistaFiltrada, setCargandoVistaFiltrada] = useState(false);
+	const [lineaEliminarPendiente, setLineaEliminarPendiente] = useState<{
+		id: string;
+		nombreCompleto: string;
+	} | null>(null);
 
 	const avisoCargaRef = useRef<HTMLDivElement>(null);
+	const previewRef = useRef<HTMLDivElement>(null);
 
 	const desplazarAAvisoCarga = useCallback(() => {
 		window.requestAnimationFrame(() => {
@@ -608,9 +614,11 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 	async function abrirPreview(tipo: string, etiquetaLegible: string) {
 		const cId = verDocs?.cuentaId;
 		if (!cId) {
+			setErrorMsg("No hay cuenta activa del alumno para mostrar vista previa.");
 			return;
 		}
 		setPreviewTitulo(etiquetaLegible || tipo);
+		setPreviewCargando(true);
 		setPreviewMime(null);
 		setPreviewUrl((prev) => {
 			if (prev) {
@@ -624,7 +632,8 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 				{ credentials: "include" },
 			);
 			if (!res.ok) {
-				setErrorMsg("No se pudo cargar la vista previa del documento.");
+				const d = (await res.json().catch(() => ({}))) as { error?: string };
+				setErrorMsg(d.error ?? "No se pudo cargar la vista previa del documento.");
 				return;
 			}
 			const buf = await res.arrayBuffer();
@@ -647,6 +656,8 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 			});
 		} catch {
 			setErrorMsg("Error de red al cargar la vista previa.");
+		} finally {
+			setPreviewCargando(false);
 		}
 	}
 
@@ -656,6 +667,15 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 				URL.revokeObjectURL(previewUrl);
 			}
 		};
+	}, [previewUrl]);
+
+	useEffect(() => {
+		if (!previewUrl) {
+			return;
+		}
+		window.requestAnimationFrame(() => {
+			previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+		});
 	}, [previewUrl]);
 
 	async function guardarCambioGrupo() {
@@ -697,9 +717,6 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 	}
 
 	async function eliminarLinea(lineaId: string) {
-		if (!confirm("¿Eliminar este alumno de la carga actual? (Si no tiene cuenta, también se quita del padrón.)")) {
-			return;
-		}
 		const cargaIdVista = vistaParaLista?.carga.id ?? "";
 		const q = new URLSearchParams();
 		q.set("lineaId", lineaId);
@@ -1112,7 +1129,7 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 					</h2>
 					<div className="mt-6 flex flex-wrap items-end gap-4">
 				<div className="min-w-[12rem] flex-1">
-					<label className="block text-sm font-semibold text-slate-700">Grupos</label>
+					<label className="block text-sm font-semibold text-slate-700">Ingresa los grupos</label>
 					<input
 						value={gruposTexto}
 						onChange={(e) => setGruposTexto(formatearListaGruposLetras(e.target.value))}
@@ -1271,29 +1288,11 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 			<h2 className="text-center text-xl font-bold text-slate-900 sm:text-2xl lg:text-left">Carga de alumnos</h2>
 			<div className="mt-4 w-full px-0">
 				<div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-end sm:gap-4">
-					<div className="min-w-0 flex-1">
-						<label className="block text-sm font-semibold text-slate-700">Filtrar por fecha de cierre</label>
-						<select
-							value={filtroFechaVista}
-							onChange={(e) => {
-								setFiltroFechaVista(e.target.value);
-								setCargaIdSubSeleccion(null);
-							}}
-							className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900"
-						>
-							<option value="">Última carga registrada</option>
-							{fechasCierreExistentes.map((f) => (
-								<option key={f} value={f}>
-									Cierre {formatearFechaMostrar(f)}
-								</option>
-							))}
-						</select>
-					</div>
 					{onAbrirModalTokens ? (
 						<button
 							type="button"
 							onClick={() => onAbrirModalTokens(contextoModalTokensDesdeVista)}
-							title="Claves por grupo del periodo elegido (fecha de cierre + grado de la carga en pantalla)"
+							title="Claves por grupo de la última carga registrada"
 							className="shrink-0 rounded-xl border-2 border-[#6D28D9] bg-[#EDE9FE] px-5 py-2.5 text-sm font-bold text-[#5B21B6] shadow-sm transition hover:bg-[#DDD6FE] sm:mb-px"
 						>
 							Tokens
@@ -1301,25 +1300,6 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 					) : null}
 				</div>
 			</div>
-			{candidatosFechaVista.length > 1 ? (
-				<div className="mt-3 w-full">
-					<label className="block text-xs font-semibold text-slate-600">Varias cargas con la misma fecha</label>
-					<select
-						value={cargaIdResueltoVista ?? ""}
-						onChange={(e) => setCargaIdSubSeleccion(e.target.value || null)}
-						className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900"
-					>
-						{candidatosFechaVista.map((c) => (
-							<option key={c.id} value={c.id}>
-								Creada {formatearFechaMostrar(c.creadoEn)} · grupos {c.gruposLetras.join(", ")}
-							</option>
-						))}
-					</select>
-				</div>
-			) : null}
-			{cargandoVistaFiltrada ? (
-				<p className="mt-4 text-center text-sm text-slate-500">Cargando alumnos de la carga…</p>
-			) : null}
 			{vistaParaLista ? (
 				<div className="mt-6 rounded-2xl border-2 border-[#C4B5FD] bg-[#EDE9FE] p-5 shadow-md">
 					<p className="mb-3 text-center text-xs font-medium text-[#5B21B6]">
@@ -1380,7 +1360,12 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 									<button
 										type="button"
 										title="Eliminar"
-										onClick={() => void eliminarLinea(ln.id)}
+										onClick={() =>
+											setLineaEliminarPendiente({
+												id: ln.id,
+												nombreCompleto: ln.nombreCompleto,
+											})
+										}
 										className="rounded-lg border-2 border-[#C4B5FD] bg-[#EDE9FE] p-2 text-[#5B21B6] transition hover:bg-[#DDD6FE]"
 									>
 										🗑
@@ -1393,13 +1378,9 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 						) : null}
 					</div>
 				</div>
-			) : !cargandoVistaFiltrada ? (
-				<p className="mt-4 text-center text-sm text-slate-500">
-					{filtroFechaVista
-						? "No hay cargas con esa fecha de cierre."
-						: "Aún no hay cargas registradas."}
-				</p>
-			) : null}
+			) : (
+				<p className="mt-4 text-center text-sm text-slate-500">Aun no hay cargas registradas.</p>
+			)}
 					</section>
 
 					<section className="min-w-0">
@@ -1549,6 +1530,40 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 				</div>
 			) : null}
 
+			{lineaEliminarPendiente ? (
+				<div className="fixed inset-0 z-[235] flex items-center justify-center bg-black/45 p-4">
+					<div className="w-full max-w-md rounded-2xl border border-[#C4B5FD] bg-white p-6 shadow-2xl">
+						<h3 className="text-center text-lg font-bold text-slate-900">Confirmar eliminacion</h3>
+						<p className="mt-3 text-center text-sm text-slate-700">
+							¿Seguro que lo quieres eliminar?
+						</p>
+						<p className="mt-1 text-center text-sm font-semibold text-slate-900">
+							{lineaEliminarPendiente.nombreCompleto}
+						</p>
+						<div className="mt-5 flex items-center justify-center gap-3">
+							<button
+								type="button"
+								onClick={() => setLineaEliminarPendiente(null)}
+								className="rounded-xl border-2 border-[#93C5FD] bg-[#DBEAFE] px-5 py-2 text-sm font-semibold text-[#1E40AF] transition hover:bg-[#BFDBFE]"
+							>
+								Cancelar
+							</button>
+							<button
+								type="button"
+								onClick={() => {
+									const id = lineaEliminarPendiente.id;
+									setLineaEliminarPendiente(null);
+									void eliminarLinea(id);
+								}}
+								className="rounded-xl border-2 border-[#C4B5FD] bg-[#EDE9FE] px-5 py-2 text-sm font-semibold text-[#5B21B6] transition hover:bg-[#DDD6FE]"
+							>
+								Eliminar
+							</button>
+						</div>
+					</div>
+				</div>
+			) : null}
+
 			{lineaCambiarGrupo ? (
 				<div className="fixed inset-0 z-[230] flex items-center justify-center bg-black/40 p-4">
 					<div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
@@ -1619,68 +1634,78 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 						</button>
 						<h3 className="mt-2 text-center text-xl font-bold">Verificar Archivos subidos por el alumno</h3>
 						<p className="text-center text-slate-700">{verDocs.nombre}</p>
-						<div className="mt-6 grid gap-4 sm:grid-cols-3">
-							{verDocs.documentos.map((doc) => (
-								<div key={doc.tipo} className="rounded-xl border border-slate-200 p-4 shadow-sm">
-									<p className="text-center font-bold text-slate-900">{doc.etiqueta}</p>
-									<div className="mt-3 flex min-h-[140px] flex-col items-center justify-center rounded-lg border border-slate-200 bg-slate-50 p-3">
-										{doc.tieneArchivo ? (
+						<div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+							<div className="grid gap-4 sm:grid-cols-2">
+								{verDocs.documentos.map((doc) => (
+									<div key={doc.tipo} className="rounded-xl border border-slate-200 p-4 shadow-sm">
+										<p className="text-center font-bold text-slate-900">{doc.etiqueta}</p>
+										<div className="mt-3 flex min-h-[140px] flex-col items-center justify-center rounded-lg border border-slate-200 bg-slate-50 p-3">
+											{doc.tieneArchivo ? (
+												<button
+													type="button"
+													onClick={() => void abrirPreview(doc.tipo, doc.etiqueta)}
+													className="flex flex-col items-center gap-2"
+												>
+													<span className="rounded border-2 border-black px-4 py-2 text-2xl font-black">
+														PDF
+													</span>
+													<span className="text-sm text-slate-600">Vista previa</span>
+												</button>
+											) : (
+												<span className="text-2xl font-bold text-slate-400">Sin archivo</span>
+											)}
+										</div>
+										<div className="mt-3 grid grid-cols-2 gap-2">
 											<button
 												type="button"
-												onClick={() => void abrirPreview(doc.tipo, doc.etiqueta)}
-												className="flex flex-col items-center gap-2"
+												disabled={!verDocs.cuentaId || !doc.tieneArchivo}
+												onClick={() => void verificarDoc("validar_manual", doc.tipo)}
+												className="rounded-lg border-2 border-[#C4B5FD] bg-[#EDE9FE] py-2 font-bold text-[#5B21B6] transition hover:bg-[#DDD6FE] disabled:opacity-40"
 											>
-												<span className="rounded border-2 border-black px-4 py-2 text-2xl font-black">
-													PDF
-												</span>
-												<span className="text-sm text-slate-600">Vista previa</span>
+												✓
 											</button>
+											<button
+												type="button"
+												disabled={!verDocs.cuentaId || !doc.tieneArchivo}
+												onClick={() => void verificarDoc("rechazar", doc.tipo)}
+												className="rounded-lg border-2 border-[#93C5FD] bg-[#DBEAFE] py-2 font-bold text-[#1E40AF] transition hover:bg-[#BFDBFE] disabled:opacity-40"
+											>
+												✕
+											</button>
+										</div>
+									</div>
+								))}
+							</div>
+							<div ref={previewRef} className="rounded-xl border border-slate-300 bg-slate-100 p-2">
+								<p className="mb-2 text-sm font-semibold text-slate-700">
+									{previewTitulo || "Vista previa"}
+								</p>
+								<div className="h-[70vh] w-full overflow-auto rounded-lg border border-slate-200 bg-white">
+									{previewCargando ? (
+										<p className="p-6 text-center text-sm text-slate-600">Cargando vista previa…</p>
+									) : previewUrl && previewMime ? (
+										previewMime.startsWith("image/") ? (
+											/* eslint-disable-next-line @next/next/no-img-element -- blob URL de vista previa */
+											<img
+												src={previewUrl}
+												alt={previewTitulo}
+												className="mx-auto h-full w-auto max-w-full object-contain"
+											/>
 										) : (
-											<span className="text-2xl font-bold text-slate-400">Sin archivo</span>
-										)}
-									</div>
-									<div className="mt-3 grid grid-cols-2 gap-2">
-										<button
-											type="button"
-											disabled={!verDocs.cuentaId || !doc.tieneArchivo}
-											onClick={() => void verificarDoc("validar_manual", doc.tipo)}
-											className="rounded-lg border border-slate-500 bg-slate-400 py-2 font-bold disabled:opacity-40"
-										>
-											✓
-										</button>
-										<button
-											type="button"
-											disabled={!verDocs.cuentaId || !doc.tieneArchivo}
-											onClick={() => void verificarDoc("rechazar", doc.tipo)}
-											className="rounded-lg border border-slate-500 bg-slate-400 py-2 font-bold disabled:opacity-40"
-										>
-											✕
-										</button>
-									</div>
-								</div>
-							))}
-						</div>
-						{previewUrl && previewMime ? (
-							<div className="mt-8 rounded-xl border border-slate-300 bg-slate-100 p-2">
-								<p className="mb-2 text-sm font-semibold text-slate-700">{previewTitulo}</p>
-								<div className="max-h-[70vh] w-full overflow-auto rounded-lg border border-slate-200 bg-white">
-									{previewMime.startsWith("image/") ? (
-										/* eslint-disable-next-line @next/next/no-img-element -- blob URL de vista previa */
-										<img
-											src={previewUrl}
-											alt={previewTitulo}
-											className="mx-auto max-h-[70vh] w-auto max-w-full object-contain"
-										/>
+											<iframe
+												title={`Vista previa ${previewTitulo}`}
+												src={previewUrl}
+												className="h-full w-full border-0 bg-white"
+											/>
+										)
 									) : (
-										<iframe
-											title={`Vista previa ${previewTitulo}`}
-											src={previewUrl}
-											className="h-[70vh] w-full border-0 bg-white"
-										/>
+										<p className="p-6 text-center text-sm text-slate-500">
+											Selecciona un documento para ver su vista previa.
+										</p>
 									)}
 								</div>
 							</div>
-						) : null}
+						</div>
 					</div>
 				</div>
 			) : null}

@@ -8,6 +8,7 @@ import { gradoMostradoParaAlumno, normalizarGradoAlumnoPayload } from "@/lib/pad
 import { normalizarMatriculaPayload } from "@/lib/padron/matricula-padron";
 import { alumnoRequiereCarrera } from "@/lib/padron/requiere-carrera";
 import { normalizarLetraGrupo } from "@/lib/orientador/cargas-helpers";
+import { TIPOS_DOCUMENTO } from "@/lib/nombre-archivo";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -24,6 +25,12 @@ type FilaPadron = {
 	grupo_tokens: { grado: string | number; grupo: string } | null;
 	institucion_grupos: { grado: string | number; grupo: string } | null;
 	cuentas_alumno: { id: string }[] | { id: string } | null;
+};
+
+type FilaEntregaMin = {
+	cuenta_id: string;
+	tipo_documento: string;
+	estado?: string | null;
 };
 
 function limpiarNombreCompleto(v: unknown): string {
@@ -98,6 +105,41 @@ export async function GET(request: Request) {
 		}
 
 		const filas = (filasRaw ?? []) as unknown as FilaPadron[];
+		const cuentaIds = filas
+			.map((f) => cuentaIdDesdePadron(f.cuentas_alumno))
+			.filter((x): x is string => typeof x === "string" && x.trim() !== "");
+		const docsBasePorCuenta = new Map<string, number>();
+		const cuentaConRechazo = new Set<string>();
+		const cuentaConAceptado = new Set<string>();
+		if (cuentaIds.length > 0) {
+			const { data: entregas } = await supabase
+				.from("entregas_documento_alumno")
+				.select("cuenta_id, tipo_documento, estado")
+				.in("cuenta_id", cuentaIds)
+				.in("tipo_documento", Object.keys(TIPOS_DOCUMENTO));
+			const filasEnt = (entregas ?? []) as unknown as FilaEntregaMin[];
+			const uniqPorCuenta = new Map<string, Set<string>>();
+			for (const e of filasEnt) {
+				const cid = String(e.cuenta_id ?? "").trim();
+				const tipo = String(e.tipo_documento ?? "").trim();
+				if (!cid || !tipo) {
+					continue;
+				}
+				const s = uniqPorCuenta.get(cid) ?? new Set<string>();
+				s.add(tipo);
+				uniqPorCuenta.set(cid, s);
+				if (String(e.estado ?? "").trim().toLowerCase() === "rechazado") {
+					cuentaConRechazo.add(cid);
+				}
+				if (String(e.estado ?? "").trim().toLowerCase() === "validado") {
+					cuentaConAceptado.add(cid);
+				}
+			}
+			for (const [cid, set] of uniqPorCuenta.entries()) {
+				docsBasePorCuenta.set(cid, set.size);
+			}
+		}
+		const totalDocsBase = Object.keys(TIPOS_DOCUMENTO).length;
 		const idsCarrera = [
 			...new Set(filas.map((f) => f.carrera_id).filter((x): x is string => typeof x === "string" && x !== "")),
 		];
@@ -138,6 +180,8 @@ export async function GET(request: Request) {
 					f.institucion_grupo_id != null && String(f.institucion_grupo_id).trim() !== ""
 						? String(f.institucion_grupo_id)
 						: null;
+				const cuentaId = cuentaIdDesdePadron(f.cuentas_alumno);
+				const documentosBaseSubidos = cuentaId ? (docsBasePorCuenta.get(cuentaId) ?? 0) : 0;
 				return {
 					padronId: f.id,
 					nombreCompleto: f.nombre_completo,
@@ -150,7 +194,12 @@ export async function GET(request: Request) {
 					carreraNombre: carrera?.nombre ?? "",
 					carreraCodigo: carrera?.codigo ?? "",
 					estado: f.archivo_muerto_en ? "inactivo" : "activo",
-					cuentaId: cuentaIdDesdePadron(f.cuentas_alumno),
+					cuentaId,
+					documentosBaseSubidos,
+					documentosBaseTotales: totalDocsBase,
+					expedienteCompleto: documentosBaseSubidos >= totalDocsBase && totalDocsBase > 0,
+					tieneDocumentoRechazado: cuentaId ? cuentaConRechazo.has(cuentaId) : false,
+					tieneDocumentoAceptado: cuentaId ? cuentaConAceptado.has(cuentaId) : false,
 				};
 			})
 			.filter((a) => (grado ? a.grado === grado : true))

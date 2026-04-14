@@ -51,14 +51,11 @@ export async function GET(
 		if (error || !carga) {
 			return NextResponse.json({ error: "Carga no encontrada" }, { status: 404 });
 		}
-		if ((carga.orientador_id as string) !== orientador.orientadorId) {
-			return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-		}
 
 		const { data: cargaMasReciente } = await supabase
 			.from("cargas_alumnos")
 			.select("id")
-			.eq("orientador_id", orientador.orientadorId)
+			.eq("orientador_id", String(carga.orientador_id ?? ""))
 			.order("creado_en", { ascending: false })
 			.limit(1)
 			.maybeSingle();

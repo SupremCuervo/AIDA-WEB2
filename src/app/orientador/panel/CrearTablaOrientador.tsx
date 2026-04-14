@@ -6,21 +6,17 @@ import { DURACION_MENSAJE_EMERGENTE_MS } from "@/lib/ui/duracion-mensaje-emergen
 /** Columnas editables de la tabla. */
 type ColKey = "grado" | "grupo" | "nombre" | "carrera" | "matricula";
 
-type CarreraOpt = { id: string; nombre: string; codigo: string };
-
-type GrupoResumenCatalogo = {
-	id: string | null;
-	institucionGrupoId: string | null;
-	grado: string;
-	grupo: string;
-};
-
 type AlumnoExp = {
 	nombreCompleto: string;
 	matricula: string;
 	grado: string;
 	grupo: string;
 	carreraNombre: string;
+	cuentaId: string | null;
+	documentosBaseSubidos?: number;
+	documentosBaseTotales?: number;
+	tieneDocumentoRechazado?: boolean;
+	tieneDocumentoAceptado?: boolean;
 };
 
 type FilaEditable = { id: string } & Record<ColKey, string>;
@@ -43,16 +39,6 @@ const COLUMNAS_INFORMACION: { key: ColKey; descripcion: string }[] = [
 	{ key: "grado", descripcion: "Grado (en tabla)" },
 	{ key: "grupo", descripcion: "Grupo (en tabla)" },
 ];
-
-function idDestinoGrupoCatalogo(g: GrupoResumenCatalogo): string {
-	if (g.id != null && String(g.id).trim() !== "") {
-		return String(g.id);
-	}
-	if (g.institucionGrupoId != null && String(g.institucionGrupoId).trim() !== "") {
-		return String(g.institucionGrupoId);
-	}
-	return "";
-}
 
 function filaVacia(): FilaEditable {
 	return {
@@ -81,8 +67,6 @@ function escapeHtml(s: string): string {
 		.replace(/"/g, "&quot;");
 }
 
-const GRADOS_OPCION = ["1", "2", "3", "4", "5", "6"] as const;
-
 function inicialIncluirColumnas(): Record<ColKey, boolean> {
 	return {
 		nombre: true,
@@ -94,17 +78,17 @@ function inicialIncluirColumnas(): Record<ColKey, boolean> {
 }
 
 export default function CrearTablaOrientador() {
-	const [carreras, setCarreras] = useState<CarreraOpt[]>([]);
-	const [catalogoGrupos, setCatalogoGrupos] = useState<GrupoResumenCatalogo[]>([]);
-	const [catalogosCargando, setCatalogosCargando] = useState(false);
-	const [errorCatalogo, setErrorCatalogo] = useState("");
-
 	const [incluirColumna, setIncluirColumna] = useState<Record<ColKey, boolean>>(inicialIncluirColumnas);
 	const [titulosColumna, setTitulosColumna] = useState<Record<ColKey, string>>(() => ({ ...ETIQUETA_DEFAULT }));
 
-	const [reqGrado, setReqGrado] = useState("");
-	const [reqGrupoDestino, setReqGrupoDestino] = useState("");
-	const [reqCarreraId, setReqCarreraId] = useState("");
+	const [reqCuenta, setReqCuenta] = useState<
+		| "todos"
+		| "con_cuenta"
+		| "sin_cuenta"
+		| "con_documento_rechazado"
+		| "con_documento_aceptado"
+	>("todos");
+	const [reqDocsBase, setReqDocsBase] = useState("");
 
 	const [filas, setFilas] = useState<FilaEditable[]>([]);
 	const [cargando, setCargando] = useState(false);
@@ -115,77 +99,6 @@ export default function CrearTablaOrientador() {
 		[incluirColumna],
 	);
 
-	const gruposParaSelect = useMemo(() => {
-		const gd = reqGrado.trim();
-		const coincideGrado = (x: GrupoResumenCatalogo) => String(x.grado).trim() === gd;
-		let filasG = gd === "" ? [] : catalogoGrupos.filter(coincideGrado);
-		const sel = reqGrupoDestino.trim();
-		if (sel && !filasG.some((x) => idDestinoGrupoCatalogo(x) === sel)) {
-			const actual = catalogoGrupos.find((x) => idDestinoGrupoCatalogo(x) === sel);
-			if (actual) {
-				filasG = [actual, ...filasG];
-			}
-		}
-		const vistos = new Set<string>();
-		return filasG.filter((x) => {
-			const v = idDestinoGrupoCatalogo(x);
-			if (!v || vistos.has(v)) {
-				return false;
-			}
-			vistos.add(v);
-			return true;
-		});
-	}, [catalogoGrupos, reqGrado, reqGrupoDestino]);
-
-	useEffect(() => {
-		let cancel = false;
-		(async () => {
-			setCatalogosCargando(true);
-			setErrorCatalogo("");
-			try {
-				const [resC, resG] = await Promise.all([
-					fetch("/api/orientador/carreras", { credentials: "include" }),
-					fetch("/api/orientador/grupos", { credentials: "include" }),
-				]);
-				const dataC = (await resC.json()) as { carreras?: CarreraOpt[]; error?: string };
-				const dataG = (await resG.json()) as { grupos?: GrupoResumenCatalogo[]; error?: string };
-				if (cancel) {
-					return;
-				}
-				if (!resC.ok) {
-					setErrorCatalogo(dataC.error ?? "No se pudieron cargar carreras");
-				} else {
-					setCarreras(dataC.carreras ?? []);
-				}
-				if (!resG.ok) {
-					setErrorCatalogo((e) => e || (dataG.error ?? "No se pudieron cargar grupos"));
-				} else {
-					const listaG = (dataG.grupos ?? []).filter((g) => idDestinoGrupoCatalogo(g) !== "");
-					listaG.sort((a, b) => {
-						const na = Number.parseInt(String(a.grado), 10) || 0;
-						const nb = Number.parseInt(String(b.grado), 10) || 0;
-						if (na !== nb) {
-							return na - nb;
-						}
-						return String(a.grupo).localeCompare(String(b.grupo), "es");
-					});
-					setCatalogoGrupos(listaG);
-				}
-			} catch {
-				if (!cancel) {
-					setErrorCatalogo("Error de red al cargar catálogos");
-				}
-			} finally {
-				if (!cancel) {
-					setCatalogosCargando(false);
-				}
-			}
-		})();
-		return () => {
-			cancel = true;
-		};
-	}, []);
-
 	useEffect(() => {
 		if (!error.trim()) {
 			return;
@@ -193,14 +106,6 @@ export default function CrearTablaOrientador() {
 		const id = window.setTimeout(() => setError(""), DURACION_MENSAJE_EMERGENTE_MS);
 		return () => window.clearTimeout(id);
 	}, [error]);
-
-	useEffect(() => {
-		if (!errorCatalogo.trim()) {
-			return;
-		}
-		const id = window.setTimeout(() => setErrorCatalogo(""), DURACION_MENSAJE_EMERGENTE_MS);
-		return () => window.clearTimeout(id);
-	}, [errorCatalogo]);
 
 	const toggleColumna = useCallback((key: ColKey) => {
 		setIncluirColumna((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -219,24 +124,6 @@ export default function CrearTablaOrientador() {
 			const p = new URLSearchParams();
 			p.set("estado", "activo");
 
-			const g = reqGrado.trim();
-			if (g !== "") {
-				p.set("grado", g);
-			}
-			const grLetra = (() => {
-				if (reqGrupoDestino.trim() === "") {
-					return "";
-				}
-				const sel = catalogoGrupos.find((x) => idDestinoGrupoCatalogo(x) === reqGrupoDestino.trim());
-				return sel ? String(sel.grupo).trim().toUpperCase() : "";
-			})();
-			if (grLetra !== "") {
-				p.set("grupo", grLetra);
-			}
-			if (reqCarreraId.trim() !== "") {
-				p.set("carreraId", reqCarreraId.trim());
-			}
-
 			const res = await fetch(`/api/orientador/expediente?${p.toString()}`, {
 				credentials: "include",
 			});
@@ -247,7 +134,29 @@ export default function CrearTablaOrientador() {
 				return;
 			}
 			// TODO(BD): mapear telefono, tutor, curp desde la respuesta cuando existan en API / padron.
-			const raw = (data.alumnos ?? []).map((a) => ({
+			const candidatos = (data.alumnos ?? []).filter((a) => {
+				if (reqCuenta === "con_cuenta" && !a.cuentaId) {
+					return false;
+				}
+				if (reqCuenta === "sin_cuenta" && a.cuentaId) {
+					return false;
+				}
+				if (reqCuenta === "con_documento_rechazado" && !a.tieneDocumentoRechazado) {
+					return false;
+				}
+				if (reqCuenta === "con_documento_aceptado" && !a.tieneDocumentoAceptado) {
+					return false;
+				}
+				const docs = Number(a.documentosBaseSubidos ?? 0);
+				if (reqDocsBase.trim() !== "") {
+					const objetivo = Number.parseInt(reqDocsBase, 10);
+					if (!Number.isFinite(objetivo) || docs !== objetivo) {
+						return false;
+					}
+				}
+				return true;
+			});
+			const raw = candidatos.map((a) => ({
 				...filaVacia(),
 				grado: a.grado ?? "",
 				grupo: a.grupo ?? "",
@@ -265,7 +174,7 @@ export default function CrearTablaOrientador() {
 		} finally {
 			setCargando(false);
 		}
-	}, [catalogoGrupos, incluirColumna, reqCarreraId, reqGrado, reqGrupoDestino]);
+	}, [incluirColumna, reqCuenta, reqDocsBase]);
 
 	const actualizarCelda = useCallback((id: string, key: ColKey, valor: string) => {
 		setFilas((prev) => prev.map((f) => (f.id === id ? { ...f, [key]: valor } : f)));
@@ -337,10 +246,6 @@ export default function CrearTablaOrientador() {
 				dato, edítalo directo en la tabla.
 			</p>
 
-			{errorCatalogo ? (
-				<p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">{errorCatalogo}</p>
-			) : null}
-
 			<div className="mt-6 grid grid-cols-1 gap-8 lg:grid-cols-[minmax(16rem,20rem)_1fr] lg:items-start xl:grid-cols-[minmax(17.5rem,22rem)_1fr]">
 				<aside className="flex min-w-0 flex-col gap-8 rounded-2xl border border-[#DDD6FE] bg-gradient-to-b from-[#FAF5FF] via-white to-[#F5F3FF] p-4 shadow-sm ring-1 ring-[#EDE9FE]/80 sm:p-5 lg:sticky lg:top-24 lg:self-start">
 					<div>
@@ -376,74 +281,55 @@ export default function CrearTablaOrientador() {
 
 					<div className="border-t border-[#E9D5FF] pt-6">
 						<h3 className="mb-1 text-base font-bold tracking-tight text-[#111827]">Requisitos</h3>
-						<p className="mb-3 text-xs leading-snug text-[#6B7280]">Menús para acotar la búsqueda antes de cargar datos.</p>
+						<p className="mb-3 text-sm font-medium leading-snug text-[#4B5563]">
+							Filtros clave para ver todo sin saturar opciones.
+						</p>
 						<div className="flex flex-col gap-3">
 							<div>
-								<label htmlFor="ct-req-grado" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#6B7280]">
-									Grado
+								<label htmlFor="ct-req-cuenta" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#6B7280]">
+									Filtro de alumnos
 								</label>
 								<select
-									id="ct-req-grado"
-									value={reqGrado}
+									id="ct-req-cuenta"
+									value={reqCuenta}
 									onChange={(e) => {
-										const next = e.target.value;
-										setReqGrado(next);
-										setReqGrupoDestino("");
-									}}
-									disabled={catalogosCargando}
-									className="w-full rounded-xl border border-[#D1D5DB] bg-white px-3 py-2.5 text-sm text-[#111827] shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] outline-none focus:border-[#A78BFA] focus:ring-2 focus:ring-[#EDE9FE] disabled:opacity-60"
-								>
-									<option value="">Todos los grados</option>
-									{GRADOS_OPCION.map((n) => (
-										<option key={n} value={n}>
-											{n}.°
-										</option>
-									))}
-								</select>
-							</div>
-							<div>
-								<label htmlFor="ct-req-grupo" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#6B7280]">
-									Grupo
-								</label>
-								<select
-									id="ct-req-grupo"
-									value={reqGrupoDestino}
-									onChange={(e) => setReqGrupoDestino(e.target.value)}
-									disabled={catalogosCargando || reqGrado.trim() === "" || gruposParaSelect.length === 0}
-									className="w-full rounded-xl border border-[#D1D5DB] bg-white px-3 py-2.5 text-sm text-[#111827] shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] outline-none focus:border-[#A78BFA] focus:ring-2 focus:ring-[#EDE9FE] disabled:opacity-60"
-								>
-									<option value="">
-										{reqGrado.trim() === ""
-											? "— Elige primero el grado —"
-											: "— Cualquier grupo de ese grado —"}
-									</option>
-									{gruposParaSelect.map((g) => {
-										const v = idDestinoGrupoCatalogo(g);
-										return (
-											<option key={v} value={v}>
-												Grupo {g.grupo}
-											</option>
+										setReqCuenta(
+											e.target.value as
+												| "todos"
+												| "con_cuenta"
+												| "sin_cuenta"
+												| "con_documento_rechazado"
+												| "con_documento_aceptado",
 										);
-									})}
-								</select>
-							</div>
-							<div>
-								<label htmlFor="ct-req-carrera" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#6B7280]">
-									Carrera
-								</label>
-								<select
-									id="ct-req-carrera"
-									value={reqCarreraId}
-									onChange={(e) => setReqCarreraId(e.target.value)}
-									disabled={catalogosCargando}
+									}}
 									className="w-full rounded-xl border border-[#D1D5DB] bg-white px-3 py-2.5 text-sm text-[#111827] shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] outline-none focus:border-[#A78BFA] focus:ring-2 focus:ring-[#EDE9FE] disabled:opacity-60"
 								>
-									<option value="">Todas las carreras</option>
-									{carreras.map((c) => (
-										<option key={c.id} value={c.id}>
-											{c.nombre}
-										</option>
-									))}
+									<option value="todos">Todos</option>
+									<option value="con_cuenta">Alumnos con cuenta</option>
+									<option value="sin_cuenta">Alumnos sin cuenta</option>
+									<option value="con_documento_rechazado">Alumnos con documento rechazado</option>
+									<option value="con_documento_aceptado">Alumnos con documento aceptado</option>
+								</select>
+								<p className="mt-1 text-xs text-[#6B7280]">
+									Aqui puedes elegir solo alumnos con documentos rechazados o aceptados.
+								</p>
+							</div>
+							<div>
+								<label htmlFor="ct-req-docs" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-[#6B7280]">
+									Documentos base subidos
+								</label>
+								<select
+									id="ct-req-docs"
+									value={reqDocsBase}
+									onChange={(e) => setReqDocsBase(e.target.value)}
+									className="w-full rounded-xl border border-[#D1D5DB] bg-white px-3 py-2.5 text-sm text-[#111827] shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] outline-none focus:border-[#A78BFA] focus:ring-2 focus:ring-[#EDE9FE] disabled:opacity-60"
+								>
+									<option value="">Todos (0 a 5)</option>
+									<option value="1">1 documento</option>
+									<option value="2">2 documentos</option>
+									<option value="3">3 documentos</option>
+									<option value="4">4 documentos</option>
+									<option value="5">5 documentos</option>
 								</select>
 							</div>
 						</div>
