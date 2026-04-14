@@ -1,35 +1,35 @@
 {
-	"name": "aida-web",
-	"version": "0.1.0",
-	"private": true,
-	"scripts": {
-		"dev": "next dev",
-		"build": "next build",
-		"start": "next start",
-		"test": "vitest run",
-		"test:watch": "vitest",
-		"deploy:function:aida-data": "npx --yes supabase@2.84.2 functions deploy aida-data --no-verify-jwt --use-api",
-		"deploy:function:aida-data:docker": "npx --yes supabase@2.84.2 functions deploy aida-data --no-verify-jwt"
-	},
-	"dependencies": {
-		"@supabase/supabase-js": "2.49.4",
-		"bcryptjs": "2.4.3",
-		"jose": "5.9.6",
-		"jszip": "^3.10.1",
-		"next": "15.2.4",
-		"pdf-lib": "1.17.1",
-		"pdfjs-dist": "^4.8.69",
-		"react": "19.0.0",
-		"react-dom": "19.0.0"
-	},
-	"devDependencies": {
-		"@types/bcryptjs": "2.4.6",
-		"@types/node": "22.13.10",
-		"@types/react": "19.0.12",
-		"@types/react-dom": "19.0.4",
-		"postcss": "8.5.3",
-		"tailwindcss": "3.4.17",
-		"typescript": "5.7.3",
-		"vitest": "3.0.5"
-	}
+  "name": "aida-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "deploy:function:aida-data": "npx --yes supabase@2.84.2 functions deploy aida-data --no-verify-jwt --use-api",
+    "deploy:function:aida-data:docker": "npx --yes supabase@2.84.2 functions deploy aida-data --no-verify-jwt"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.49.4",
+    "bcryptjs": "2.4.3",
+    "jose": "5.9.6",
+    "jszip": "^3.10.1",
+    "next": "15.2.8",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "^4.8.69",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "2.4.6",
+    "@types/node": "22.13.10",
+    "@types/react": "19.0.12",
+    "@types/react-dom": "19.0.4",
+    "postcss": "8.5.3",
+    "tailwindcss": "3.4.17",
+    "typescript": "5.7.3",
+    "vitest": "3.0.5"
+  }
 }
