@@ -20,16 +20,62 @@ function soloDigitosGrado(s: string): string {
 	return String(s).replace(/\D/g, "");
 }
 
+function textoPlanoDetalle(v: unknown): string | null {
+	if (v == null) {
+		return null;
+	}
+	const t = String(v).trim();
+	return t !== "" ? t : null;
+}
+
+/**
+ * Contexto escolar que la API guarda en `detalle` (sin `antes`/`despues` de triggers).
+ */
+function gradoGrupoDesdeDetallePlano(
+	entidad: string,
+	detalle: unknown,
+): { grado: string | null; grupo: string | null } | null {
+	if (detalle == null || typeof detalle !== "object" || Array.isArray(detalle)) {
+		return null;
+	}
+	const e = entidad.trim().toLowerCase();
+	const d = detalle as JsonRecord;
+
+	if (e === "padron_alumnos" || e === "entregas_documento_alumno") {
+		const sg = textoPlanoDetalle(d.seccion_grado ?? d.grado_contexto);
+		const sgrRaw = textoPlanoDetalle(d.seccion_grupo ?? d.grupo_contexto);
+		const sgr = sgrRaw != null ? sgrRaw.toUpperCase() : null;
+		if (sg != null || sgr != null) {
+			return { grado: sg, grupo: sgr };
+		}
+	}
+	if (e === "grupo_tokens" || e === "institucion_grupos") {
+		const g = textoPlanoDetalle(d.seccion_grado ?? d.grado);
+		const grRaw = textoPlanoDetalle(d.seccion_grupo ?? d.grupo);
+		const gr = grRaw != null ? grRaw.toUpperCase() : null;
+		if (g != null || gr != null) {
+			return { grado: g, grupo: gr };
+		}
+	}
+	return null;
+}
+
 /**
  * Grado / grupo legibles para filtros y columnas del historial.
- * Viene de `detalle` JSON (triggers) según la tabla `entidad`.
+ * - API: `detalle.seccion_grado` / `detalle.seccion_grupo` (y equivalentes por entidad).
+ * - Triggers: `detalle.antes` / `detalle.despues` según `entidad`.
  */
 export function gradoGrupoContextoDesdeLog(
 	entidad: string,
 	detalle: unknown,
 ): { grado: string | null; grupo: string | null } {
-	const row = filaDetalleReciente(detalle);
 	const e = entidad.trim().toLowerCase();
+	const plano = gradoGrupoDesdeDetallePlano(entidad, detalle);
+	if (plano) {
+		return plano;
+	}
+
+	const row = filaDetalleReciente(detalle);
 	if (!row) {
 		return { grado: null, grupo: null };
 	}

@@ -7,6 +7,7 @@ import { gradoMostradoParaAlumno, normalizarGradoAlumnoPayload } from "@/lib/pad
 import { normalizarMatriculaPayload } from "@/lib/padron/matricula-padron";
 import { alumnoRequiereCarrera } from "@/lib/padron/requiere-carrera";
 import { etiquetaAuditoriaOrientador, registrarLogApi } from "@/lib/orientador/audit-registrar";
+import { seccionGradoGrupoParaLogPadron } from "@/lib/orientador/log-seccion-padron";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
 
@@ -14,15 +15,6 @@ export const runtime = "nodejs";
 
 function limpiarNombre(v: unknown): string {
 	return typeof v === "string" ? v.trim().replace(/\s+/g, " ") : "";
-}
-
-function refExpedienteLog(matricula: string | null | undefined, padronId: string): string {
-	const m = typeof matricula === "string" ? matricula.trim() : "";
-	if (m !== "") {
-		return m;
-	}
-	const s = padronId.replace(/-/g, "");
-	return s.length <= 4 ? s : s.slice(-4);
 }
 
 export async function PATCH(
@@ -273,6 +265,44 @@ export async function PATCH(
 			return NextResponse.json({ error: "No se pudo actualizar" }, { status: 500 });
 		}
 
+		const detallesCambios: string[] = [];
+		if (nombreNuevo) {
+			detallesCambios.push("nombre");
+		}
+		if (destino) {
+			detallesCambios.push("grupo");
+		}
+		if (tocaGrado) {
+			detallesCambios.push("grado");
+		}
+		if (tocaCarrera) {
+			detallesCambios.push("carrera");
+		}
+		if (tocaMatricula) {
+			detallesCambios.push("matricula");
+		}
+		if (tocaEstado && estadoNorm) {
+			detallesCambios.push(estadoNorm === "inactivo" ? "inactivacion" : "reactivacion");
+		}
+		const accionLog =
+			tocaEstado && estadoNorm === "inactivo"
+				? `Inactivacion expediente - ${nombreFinal}`
+				: tocaEstado && estadoNorm === "activo"
+					? `Reactivacion expediente - ${nombreFinal}`
+					: `Actualizacion expediente - ${nombreFinal}`;
+		const secLog = await seccionGradoGrupoParaLogPadron(supabase, padronId);
+		await registrarLogApi({
+			orientador,
+			accion: accionLog,
+			entidad: "padron_alumnos",
+			entidadId: padronId,
+			detalle: {
+				campos: detallesCambios,
+				estado_expediente: estadoNorm,
+				...secLog,
+			},
+		});
+
 		return NextResponse.json({
 			ok: true,
 			padronId,
@@ -308,26 +338,27 @@ export async function DELETE(
 		const supabase = obtenerClienteSupabaseAdmin();
 		const { data: fila, error: errQ } = await supabase
 			.from("padron_alumnos")
-			.select("id, nombre_completo, grupo_token_id, matricula")
+			.select("id, nombre_completo, grupo_token_id")
 			.eq("id", padronId)
 			.maybeSingle();
 		if (errQ || !fila) {
 			return NextResponse.json({ error: "Alumno no encontrado en padrón" }, { status: 404 });
 		}
+		const secLog = await seccionGradoGrupoParaLogPadron(supabase, padronId);
 		const { error } = await supabase.from("padron_alumnos").delete().eq("id", padronId);
 		if (error) {
 			console.error("padron DELETE", error);
 			return NextResponse.json({ error: "No se pudo eliminar" }, { status: 500 });
 		}
-		const refDel = refExpedienteLog(fila.matricula, padronId);
 		await registrarLogApi({
 			orientador,
-			accion: `Eliminación de expediente ${refDel} (${fila.nombre_completo})`,
+			accion: `Eliminacion expediente - ${fila.nombre_completo}`,
 			entidad: "padron_alumnos",
 			entidadId: padronId,
 			detalle: {
 				nombre_completo: fila.nombre_completo,
 				grupo_token_id: fila.grupo_token_id,
+				...secLog,
 			},
 		});
 		return NextResponse.json({ ok: true });

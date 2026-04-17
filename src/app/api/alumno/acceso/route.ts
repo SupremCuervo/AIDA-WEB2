@@ -21,6 +21,9 @@ export const runtime = "nodejs";
 
 const SALT_ROUNDS = 10;
 
+/** Solo al crear cuenta nueva; los accesos con cuenta existente conservan su longitud previa. */
+const LONGITUD_MINIMA_CONTRASENA_ALUMNO_NUEVA = 9;
+
 async function completarAccesoConPadron(
 	supabase: ReturnType<typeof obtenerClienteSupabaseAdmin>,
 	filaPadron: { id: string; nombre_completo: string; grado_alumno: string | null; archivo_muerto_en: string | null },
@@ -81,6 +84,16 @@ async function completarAccesoConPadron(
 		res.cookies.set(COOKIE_ALUMNO, jwt, opcionesCookieHttp(7 * 24 * 60 * 60));
 		res.cookies.delete(COOKIE_CLAVE_OK);
 		return res;
+	}
+
+	if (password.length < LONGITUD_MINIMA_CONTRASENA_ALUMNO_NUEVA) {
+		return NextResponse.json(
+			{
+				code: "PASSWORD_CORTA",
+				error: `La contraseña debe tener al menos ${LONGITUD_MINIMA_CONTRASENA_ALUMNO_NUEVA} caracteres.`,
+			},
+			{ status: 400 },
+		);
 	}
 
 	const password_hash = await bcrypt.hash(password, SALT_ROUNDS);

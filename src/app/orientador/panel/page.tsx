@@ -1110,13 +1110,23 @@ export default function OrientadorPanelPage() {
 				};
 			});
 			if (filtroPeriodo && filtroPeriodo.fechaCierre) {
-				const fc = filtroPeriodo.fechaCierre.slice(0, 10);
 				const gCarga = filtroPeriodo.gradoCarga;
-				filas = filas.filter((row) => {
-					const fRow = row.fechaLimiteEntrega ? row.fechaLimiteEntrega.slice(0, 10) : "";
-					const ng = Number.parseInt(row.grado, 10) || 0;
-					return fRow === fc && ng === gCarga;
-				});
+				const gruposSet = new Set(
+					(filtroPeriodo.gruposLetras ?? []).map((x) => String(x).trim().toUpperCase()).filter(Boolean),
+				);
+				if (gruposSet.size > 0) {
+					filas = filas.filter((row) => {
+						const ng = Number.parseInt(row.grado, 10) || 0;
+						return ng === gCarga && gruposSet.has(String(row.grupo).toUpperCase());
+					});
+				} else {
+					const fc = filtroPeriodo.fechaCierre.slice(0, 10);
+					filas = filas.filter((row) => {
+						const fRow = row.fechaLimiteEntrega ? row.fechaLimiteEntrega.slice(0, 10) : "";
+						const ng = Number.parseInt(row.grado, 10) || 0;
+						return fRow === fc && ng === gCarga;
+					});
+				}
 			}
 			filas.sort((a, b) => {
 				const na = Number.parseInt(a.grado, 10) || 0;
@@ -2358,8 +2368,9 @@ export default function OrientadorPanelPage() {
 										</h2>
 										{filtroTokensPeriodoModal ? (
 											<p className="mt-1 text-xs font-semibold text-[#5B21B6]">
-												Periodo en pantalla: cierre {filtroTokensPeriodoModal.fechaCierre} ·{" "}
-												{filtroTokensPeriodoModal.gradoCarga}° (solo esos tokens).
+												Carga en pantalla: cierre {filtroTokensPeriodoModal.fechaCierre} ·{" "}
+												{filtroTokensPeriodoModal.gradoCarga}° · grupos{" "}
+												{(filtroTokensPeriodoModal.gruposLetras ?? []).join(", ") || "—"}.
 											</p>
 										) : (
 											<p className="mt-1 text-xs text-[#64748B]">

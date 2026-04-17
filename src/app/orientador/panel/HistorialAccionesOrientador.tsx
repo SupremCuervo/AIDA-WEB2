@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type RegistroLog = {
 	id: string;
 	creado_en: string;
 	actor_tipo: string;
 	actor_etiqueta: string;
+	correo_electronico?: string;
 	accion: string;
 	entidad: string;
 	entidad_id: string | null;
@@ -28,12 +29,16 @@ function formatearFechaHora(iso: string): string {
 	return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
 }
 
-function etiquetaUsuario(actorEtiqueta: string): string {
-	const t = actorEtiqueta.trim();
-	if (t === "" || t.toLowerCase() === "sistema") {
-		return "Sistema";
+function textoCorreoAuditoria(r: RegistroLog): string {
+	const c = typeof r.correo_electronico === "string" ? r.correo_electronico.trim() : "";
+	if (c !== "") {
+		return c;
 	}
-	return t;
+	const et = typeof r.actor_etiqueta === "string" ? r.actor_etiqueta.trim() : "";
+	if (et !== "" && et.toLowerCase() !== "sistema" && et.includes("@")) {
+		return et;
+	}
+	return "—";
 }
 
 function textoContexto(v: string | null): string {
@@ -75,6 +80,16 @@ export default function HistorialAccionesOrientador() {
 	const [filtroCorreo, setFiltroCorreo] = useState("");
 	const [filtroGrado, setFiltroGrado] = useState("");
 	const [filtroGrupo, setFiltroGrupo] = useState("");
+	const [filtroInicialAplicado, setFiltroInicialAplicado] = useState(false);
+
+	const sugerenciasAccionDatalist = useMemo(() => {
+		const q = filtroAccion.trim().toLowerCase();
+		const max = 120;
+		if (q === "") {
+			return listaAcciones.slice(0, max);
+		}
+		return listaAcciones.filter((a) => a.toLowerCase().includes(q)).slice(0, max);
+	}, [listaAcciones, filtroAccion]);
 
 	const cargar = useCallback(async () => {
 		setCargando(true);
@@ -132,9 +147,20 @@ export default function HistorialAccionesOrientador() {
 
 	useEffect(() => {
 		void cargar();
-		// Carga inicial; los cambios de filtros se aplican con «Actualizar».
+		// Carga inicial.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
+
+	useEffect(() => {
+		if (!filtroInicialAplicado) {
+			setFiltroInicialAplicado(true);
+			return;
+		}
+		const id = window.setTimeout(() => {
+			void cargar();
+		}, 250);
+		return () => window.clearTimeout(id);
+	}, [filtroDesde, filtroHasta, filtroAccion, filtroCorreo, filtroGrado, filtroGrupo, cargar, filtroInicialAplicado]);
 
 	useEffect(() => {
 		void (async () => {
@@ -185,21 +211,25 @@ export default function HistorialAccionesOrientador() {
 						</label>
 						<label className="flex w-[min(100%,22rem)] min-w-[12rem] shrink-0 flex-col gap-1 text-xs font-medium text-slate-600">
 							Acción
-							<select
+							<input
+								type="search"
+								list="historial-acciones-datalist"
+								autoComplete="off"
 								value={filtroAccion}
 								onChange={(e) => setFiltroAccion(e.target.value)}
-								disabled={cargandoListaAcciones}
-								className="w-full max-w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-900 disabled:cursor-wait disabled:opacity-60"
-							>
-								<option value="">
-									{cargandoListaAcciones ? "Cargando lista…" : "Todas las acciones"}
-								</option>
-								{listaAcciones.map((a) => (
-									<option key={a} value={a} title={a}>
-										{a.length > 80 ? `${a.slice(0, 77)}…` : a}
-									</option>
+								placeholder={
+									cargandoListaAcciones
+										? "Cargando sugerencias…"
+										: "Escribe para filtrar (coincidencia parcial)"
+								}
+								className="w-full max-w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-900 placeholder:text-slate-400"
+								title="Filtra por texto contenido en la acción. Las sugerencias son acciones ya registradas."
+							/>
+							<datalist id="historial-acciones-datalist">
+								{sugerenciasAccionDatalist.map((a) => (
+									<option key={a} value={a} />
 								))}
-							</select>
+							</datalist>
 						</label>
 						<label className="flex w-[min(100%,14rem)] min-w-[10rem] shrink-0 flex-col gap-1 text-xs font-medium text-slate-600">
 							Correo
@@ -212,41 +242,35 @@ export default function HistorialAccionesOrientador() {
 								className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-900 placeholder:text-slate-400"
 							/>
 						</label>
-						<label className="flex w-14 shrink-0 flex-col gap-1 text-xs font-medium text-slate-600">
-							Grado
-							<input
-								type="text"
-								inputMode="numeric"
-								pattern="[1-6]"
-								maxLength={1}
-								title="Un solo dígito del 1 al 6"
-								value={filtroGrado}
-								onChange={(e) => setFiltroGrado(sanitizarFiltroGrado(e.target.value))}
-								placeholder="1"
-								className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-center text-sm tabular-nums text-slate-900 placeholder:text-slate-400"
-							/>
-						</label>
-						<label className="flex w-14 shrink-0 flex-col gap-1 text-xs font-medium text-slate-600">
-							Grupo
-							<input
-								type="text"
-								inputMode="text"
-								maxLength={1}
-								title="Una sola letra"
-								value={filtroGrupo}
-								onChange={(e) => setFiltroGrupo(sanitizarFiltroGrupoLetra(e.target.value))}
-								placeholder="A"
-								className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-center text-sm uppercase text-slate-900 placeholder:text-slate-400"
-							/>
-						</label>
-						<button
-							type="button"
-							onClick={() => void cargar()}
-							disabled={cargando}
-							className="shrink-0 rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm transition hover:bg-emerald-50 disabled:opacity-50"
-						>
-							{cargando ? "Actualizando…" : "Actualizar"}
-						</button>
+						<div className="flex shrink-0 items-end gap-2">
+							<label className="flex w-14 flex-col gap-1 text-xs font-medium text-slate-600">
+								Grado
+								<input
+									type="text"
+									inputMode="numeric"
+									pattern="[1-6]"
+									maxLength={1}
+									title="Un solo dígito del 1 al 6"
+									value={filtroGrado}
+									onChange={(e) => setFiltroGrado(sanitizarFiltroGrado(e.target.value))}
+									placeholder="1"
+									className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-center text-sm tabular-nums text-slate-900 placeholder:text-slate-400"
+								/>
+							</label>
+							<label className="flex w-14 flex-col gap-1 text-xs font-medium text-slate-600">
+								Grupo
+								<input
+									type="text"
+									inputMode="text"
+									maxLength={1}
+									title="Una sola letra"
+									value={filtroGrupo}
+									onChange={(e) => setFiltroGrupo(sanitizarFiltroGrupoLetra(e.target.value))}
+									placeholder="A"
+									className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-center text-sm uppercase text-slate-900 placeholder:text-slate-400"
+								/>
+							</label>
+						</div>
 					</div>
 				</div>
 
@@ -263,7 +287,7 @@ export default function HistorialAccionesOrientador() {
 						<table className="w-full min-w-[880px] border-collapse text-left text-sm">
 							<thead>
 								<tr className="border-b border-slate-200 bg-slate-50">
-									<th className="px-4 py-3 font-bold text-slate-800 sm:px-6">Usuario</th>
+									<th className="px-4 py-3 font-bold text-slate-800 sm:px-6">Correo electrónico</th>
 									<th className="px-4 py-3 font-bold text-slate-800 sm:px-6">Acción</th>
 									<th className="px-4 py-3 font-bold text-slate-800 sm:px-6">Grado</th>
 									<th className="px-4 py-3 font-bold text-slate-800 sm:px-6">Grupo</th>
@@ -279,7 +303,7 @@ export default function HistorialAccionesOrientador() {
 										className="border-b border-slate-100 last:border-0 hover:bg-slate-50/80"
 									>
 										<td className="max-w-[140px] truncate px-4 py-3 align-top font-medium text-slate-800 sm:max-w-[200px] sm:px-6">
-											{etiquetaUsuario(r.actor_etiqueta)}
+											{textoCorreoAuditoria(r)}
 										</td>
 										<td className="px-4 py-3 align-top text-slate-700 sm:px-6">{r.accion}</td>
 										<td className="whitespace-nowrap px-4 py-3 align-top tabular-nums text-slate-600 sm:px-6">

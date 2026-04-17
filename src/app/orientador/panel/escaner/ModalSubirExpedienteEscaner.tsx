@@ -164,7 +164,7 @@ export default function ModalSubirExpedienteEscaner({
 			form.append("tramite", tramite);
 			form.append("lang", "spa");
 			form.append("use_ocr_space_fallback", "true");
-			form.append("aplicar_preproceso_ocr", "true");
+			form.append("aplicar_preproceso_ocr", "false");
 			form.append("aplicar_saturacion_hsv", "true");
 			const res = await fetch("/api/orientador/ocr/extract", {
 				method: "POST",

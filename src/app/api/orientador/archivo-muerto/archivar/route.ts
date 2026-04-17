@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { argsRpcActorOrientador } from "@/lib/orientador/audit-registrar";
+import { registrarLogApi } from "@/lib/orientador/audit-registrar";
+import {
+	seccionGradoGrupoParaLogGrupoToken,
+	seccionGradoGrupoParaLogPadron,
+} from "@/lib/orientador/log-seccion-padron";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
 
@@ -42,6 +47,15 @@ export async function POST(request: Request) {
 		const actor = argsRpcActorOrientador(orientador);
 
 		if (padronIds.length > 0) {
+			let nombreUnico: string | null = null;
+			if (padronIds.length === 1) {
+				const { data: alumno } = await supabase
+					.from("padron_alumnos")
+					.select("nombre_completo")
+					.eq("id", padronIds[0]!)
+					.maybeSingle();
+				nombreUnico = alumno?.nombre_completo ? String(alumno.nombre_completo).trim() : null;
+			}
 			const { data, error } = await supabase.rpc("aud_archivar_padrones", {
 				p_padron_ids: padronIds,
 				p_grupo_token_id: grupoTokenId || null,
@@ -52,6 +66,25 @@ export async function POST(request: Request) {
 				return NextResponse.json({ error: "No se pudo archivar" }, { status: 500 });
 			}
 			const res = data as RpcArchivarResult | null;
+			let secExtra: Awaited<ReturnType<typeof seccionGradoGrupoParaLogPadron>> | Record<string, never> =
+				{};
+			if (padronIds.length === 1) {
+				secExtra = await seccionGradoGrupoParaLogPadron(supabase, padronIds[0]!);
+			}
+			await registrarLogApi({
+				orientador,
+				accion:
+					padronIds.length === 1
+						? `Inactivacion expediente - ${nombreUnico ?? "Sin nombre"}`
+						: `Inactivacion masiva de expedientes (${res?.archivados ?? 0})`,
+				entidad: "padron_alumnos",
+				detalle: {
+					padron_ids: padronIds,
+					grupo_token_id: grupoTokenId || null,
+					nombre_completo: nombreUnico,
+					...secExtra,
+				},
+			});
 			return NextResponse.json({ ok: true, archivados: res?.archivados ?? 0 });
 		}
 
@@ -74,6 +107,18 @@ export async function POST(request: Request) {
 				return NextResponse.json({ error: "No se pudo archivar el grupo" }, { status: 500 });
 			}
 			const res = data as RpcArchivarResult | null;
+			const secGrupo = await seccionGradoGrupoParaLogGrupoToken(supabase, grupoTokenId);
+			await registrarLogApi({
+				orientador,
+				accion: `Inactivacion de grupo completo (${res?.archivados ?? 0})`,
+				entidad: "grupo_tokens",
+				entidadId: grupoTokenId,
+				detalle: {
+					grupo_token_id: grupoTokenId,
+					archivados: res?.archivados ?? 0,
+					...secGrupo,
+				},
+			});
 			return NextResponse.json({ ok: true, archivados: res?.archivados ?? 0 });
 		}
 

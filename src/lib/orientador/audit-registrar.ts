@@ -19,13 +19,17 @@ export async function registrarLogApi(params: {
 	entidadId?: string | null;
 	detalle?: Record<string, unknown> | null;
 }): Promise<void> {
+	if (!params.orientador) {
+		// Esta capa registra solo acciones de orientador autenticado.
+		return;
+	}
 	try {
 		const supabase = obtenerClienteSupabaseAdmin();
 		const o = params.orientador;
 		const { error } = await supabase.rpc("registrar_log", {
-			p_actor_tipo: o ? "orientador" : "sistema",
-			p_actor_id: o?.orientadorId ?? null,
-			p_actor_etiqueta: o ? etiquetaAuditoriaOrientador(o) : "sistema",
+			p_actor_tipo: "orientador",
+			p_actor_id: o.orientadorId,
+			p_actor_etiqueta: etiquetaAuditoriaOrientador(o),
 			p_accion: params.accion,
 			p_entidad: params.entidad,
 			p_entidad_id: params.entidadId ?? null,
@@ -47,9 +51,9 @@ export function argsRpcActorOrientador(orientador: PayloadOrientador | null): {
 } {
 	if (!orientador) {
 		return {
-			p_actor_tipo: "sistema",
+			p_actor_tipo: "orientador",
 			p_actor_id: null,
-			p_actor_etiqueta: "sistema",
+			p_actor_etiqueta: "",
 		};
 	}
 	return {

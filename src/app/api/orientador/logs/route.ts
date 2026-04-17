@@ -22,6 +22,8 @@ export type RegistroLogHistorial = {
 	creado_en: string;
 	actor_tipo: string;
 	actor_etiqueta: string;
+	/** Correo para mostrar en columnas de auditoría (resuelve orientador por `actor_id` si hace falta). */
+	correo_electronico: string;
 	accion: string;
 	entidad: string;
 	entidad_id: string | null;
@@ -29,6 +31,60 @@ export type RegistroLogHistorial = {
 	grado_contexto: string | null;
 	grupo_contexto: string | null;
 };
+
+function etiquetaEsSistema(etiqueta: string): boolean {
+	const t = etiqueta.trim().toLowerCase();
+	return t === "" || t === "sistema";
+}
+
+function correoDesdeFila(
+	row: {
+		actor_tipo: string;
+		actor_id: string | null;
+		actor_etiqueta: string;
+		detalle?: unknown;
+	},
+	emailsPorOrientadorId: Map<string, string>,
+): string {
+	const tipo = String(row.actor_tipo ?? "").trim().toLowerCase();
+	if (tipo === "orientador" && row.actor_id) {
+		const deTabla = emailsPorOrientadorId.get(row.actor_id);
+		if (deTabla && deTabla.trim() !== "") {
+			return deTabla.trim();
+		}
+	}
+	const et = String(row.actor_etiqueta ?? "").trim();
+	if (!etiquetaEsSistema(et) && et.includes("@")) {
+		return et;
+	}
+	const orientadorIdDetalle = orientadorIdDesdeDetalle(row.detalle);
+	if (orientadorIdDetalle) {
+		const deDetalle = emailsPorOrientadorId.get(orientadorIdDetalle);
+		if (deDetalle && deDetalle.trim() !== "") {
+			return deDetalle.trim();
+		}
+	}
+	return "";
+}
+
+function orientadorIdDesdeDetalle(detalle: unknown): string | null {
+	if (!detalle || typeof detalle !== "object") {
+		return null;
+	}
+	const d = detalle as Record<string, unknown>;
+	const despues =
+		d.despues && typeof d.despues === "object" ? (d.despues as Record<string, unknown>) : null;
+	const antes = d.antes && typeof d.antes === "object" ? (d.antes as Record<string, unknown>) : null;
+	const candidatoDespues = typeof despues?.orientador_id === "string" ? despues.orientador_id.trim() : "";
+	if (candidatoDespues !== "") {
+		return candidatoDespues;
+	}
+	const candidatoAntes = typeof antes?.orientador_id === "string" ? antes.orientador_id.trim() : "";
+	if (candidatoAntes !== "") {
+		return candidatoAntes;
+	}
+	return null;
+}
 
 export async function GET(req: Request) {
 	const orientador = await obtenerPayloadOrientador();
@@ -57,6 +113,7 @@ export async function GET(req: Request) {
 			.select(
 				"id, creado_en, actor_tipo, actor_id, actor_etiqueta, accion, entidad, entidad_id, detalle, origen",
 			)
+			.eq("origen", "api")
 			.order("creado_en", { ascending: false })
 			.limit(limite);
 
@@ -68,8 +125,9 @@ export async function GET(req: Request) {
 			const fin = `${hasta}T23:59:59.999Z`;
 			q = q.lte("creado_en", fin);
 		}
-		if (accion !== "") {
-			q = q.eq("accion", accion);
+		const accionFiltro = sanitizarPatronIlike(accion);
+		if (accionFiltro !== "") {
+			q = q.ilike("accion", `%${accionFiltro}%`);
 		}
 		if (correo !== "") {
 			q = q.ilike("actor_etiqueta", `%${correo}%`);
@@ -86,6 +144,7 @@ export async function GET(req: Request) {
 			id: string;
 			creado_en: string;
 			actor_tipo: string;
+			actor_id: string | null;
 			actor_etiqueta: string;
 			accion: string;
 			entidad: string;
@@ -94,6 +153,36 @@ export async function GET(req: Request) {
 			origen: string;
 		}>;
 
+		const idsOrientador = new Set<string>();
+		for (const row of filas) {
+			const tipo = String(row.actor_tipo ?? "").trim().toLowerCase();
+			if (tipo === "orientador" && row.actor_id) {
+				idsOrientador.add(row.actor_id);
+			}
+			const oidDetalle = orientadorIdDesdeDetalle(row.detalle);
+			if (oidDetalle) {
+				idsOrientador.add(oidDetalle);
+			}
+		}
+		const emailsPorOrientadorId = new Map<string, string>();
+		if (idsOrientador.size > 0) {
+			const { data: orientadoresRows, error: errOrientadores } = await supabase
+				.from("orientadores")
+				.select("id, email")
+				.in("id", [...idsOrientador]);
+			if (errOrientadores) {
+				console.error("logs GET orientadores email", errOrientadores);
+			} else {
+				for (const o of orientadoresRows ?? []) {
+					const id = typeof o.id === "string" ? o.id : "";
+					const em = typeof o.email === "string" ? o.email.trim() : "";
+					if (id !== "" && em !== "") {
+						emailsPorOrientadorId.set(id, em);
+					}
+				}
+			}
+		}
+
 		const enriquecidos: RegistroLogHistorial[] = filas.map((row) => {
 			const { grado, grupo } = gradoGrupoContextoDesdeLog(row.entidad, row.detalle);
 			return {
@@ -101,6 +190,15 @@ export async function GET(req: Request) {
 				creado_en: row.creado_en,
 				actor_tipo: row.actor_tipo,
 				actor_etiqueta: row.actor_etiqueta,
+				correo_electronico: correoDesdeFila(
+					{
+						actor_tipo: row.actor_tipo,
+						actor_id: row.actor_id,
+						actor_etiqueta: row.actor_etiqueta,
+						detalle: row.detalle,
+					},
+					emailsPorOrientadorId,
+				),
 				accion: row.accion,
 				entidad: row.entidad,
 				entidad_id: row.entidad_id,
@@ -110,14 +208,16 @@ export async function GET(req: Request) {
 			};
 		});
 
+		const conCorreo = enriquecidos.filter((r) => r.correo_electronico.trim() !== "");
+
 		const filtrados =
 			gradoF !== "" || grupoF !== ""
-				? enriquecidos.filter(
+				? conCorreo.filter(
 						(r) =>
 							coincideFiltroGrado(gradoF, r.grado_contexto) &&
 							coincideFiltroGrupo(grupoF, r.grupo_contexto),
 					)
-				: enriquecidos;
+				: conCorreo;
 
 		return NextResponse.json({ ok: true, registros: filtrados });
 	} catch (e) {

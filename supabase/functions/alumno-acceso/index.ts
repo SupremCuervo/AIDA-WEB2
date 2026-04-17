@@ -195,6 +195,15 @@ Deno.serve(async (req) => {
 			}
 			cuentaIdFinal = String(cuenta.id);
 		} else {
+			if (pw.length < 9) {
+				return jsonRes(
+					{
+						code: "PASSWORD_CORTA",
+						error: "La contraseña debe tener al menos 9 caracteres.",
+					},
+					400,
+				);
+			}
 			const hash = bcrypt.hashSync(pw, 10);
 			const { data: nueva, error: errInsert } = await admin
 				.from("cuentas_alumno")

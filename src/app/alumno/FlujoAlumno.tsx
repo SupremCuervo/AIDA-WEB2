@@ -134,6 +134,13 @@ export default function FlujoAlumno() {
       });
       const data = (await res.json()) as { code?: string; error?: string };
       if (!res.ok) {
+        if (data.code === "PASSWORD_CORTA") {
+          setErrorCuenta(
+            data.error ??
+              "La contraseña debe tener al menos 9 caracteres (solo la primera vez que creas tu cuenta).",
+          );
+          return;
+        }
         if (data.code === "PASSWORD_INVALID") {
           setMostrarUsb(true);
           return;
@@ -342,7 +349,7 @@ export default function FlujoAlumno() {
                       type="password"
                       autoComplete="new-password"
                       className="min-w-0 flex-1 rounded-xl border border-[#E2E8F0] bg-white px-4 py-3.5 text-base text-[#1E293B] outline-none placeholder:text-[#94A3B8] focus:border-[#2563EB] focus:ring-2 focus:ring-[#DBEAFE] disabled:bg-[#F1F5F9] sm:text-lg"
-                      placeholder="Contraseña "
+                      placeholder="Contraseña (mín. 9 caracteres la 1.ª vez)"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       disabled={cargando || !claveYaValidada}
@@ -356,6 +363,11 @@ export default function FlujoAlumno() {
                       ?
                     </button>
                   </div>
+                  <p className="text-xs font-medium leading-relaxed text-[#64748B] sm:text-sm">
+                    La primera vez que creas tu cuenta, la contraseña debe
+                    tener al menos 9 caracteres. Si ya tenías cuenta, usa la
+                    misma contraseña de siempre.
+                  </p>
                   {errorCuenta ? (
                     <p
                       className="text-base font-medium text-red-600"
@@ -423,9 +435,10 @@ export default function FlujoAlumno() {
                   </>
                 ) : (
                   <>
-                    Crea una contraseña pero anótala bien ya que no la puedes
-                    recuperar si se te olvida. Deberás ir a la escuela con una
-                    USB y tus archivos previamente escaneados.
+                    La primera vez que entras, la contraseña debe tener al
+                    menos 9 caracteres. Anótala bien: no hay recuperación si se
+                    te olvida. Si hace falta, podrás ir a la escuela con una USB
+                    y tus archivos escaneados.
                   </>
                 )}
               </p>

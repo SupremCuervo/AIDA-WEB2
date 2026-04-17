@@ -9,6 +9,8 @@ import { normalizarMatriculaPayload } from "@/lib/padron/matricula-padron";
 import { alumnoRequiereCarrera } from "@/lib/padron/requiere-carrera";
 import { normalizarLetraGrupo } from "@/lib/orientador/cargas-helpers";
 import { TIPOS_DOCUMENTO } from "@/lib/nombre-archivo";
+import { registrarLogApi } from "@/lib/orientador/audit-registrar";
+import { seccionGradoGrupoParaLogPadron } from "@/lib/orientador/log-seccion-padron";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -474,6 +476,21 @@ export async function POST(request: Request) {
 				);
 			}
 		}
+
+		const secLog = await seccionGradoGrupoParaLogPadron(supabase, padronNuevoId);
+		await registrarLogApi({
+			orientador,
+			accion: `Creacion expediente - ${nombre}`,
+			entidad: "padron_alumnos",
+			entidadId: padronNuevoId,
+			detalle: {
+				nombre_completo: nombre,
+				grupo_token_id: grupoTokenDestino,
+				institucion_grupo_id: institucionGrupoDestino,
+				carga_alumnos_id: cargaInscripcionId,
+				...secLog,
+			},
+		});
 
 		return NextResponse.json({
 			ok: true,

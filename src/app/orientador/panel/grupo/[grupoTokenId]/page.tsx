@@ -64,6 +64,7 @@ type LogFila = {
 	creado_en: string;
 	actor_tipo: string;
 	actor_etiqueta: string;
+	correo_electronico?: string;
 	accion: string;
 	entidad: string;
 	entidad_id: string | null;
@@ -94,6 +95,18 @@ function logPerteneceAGrupo(
 		return true;
 	}
 	return false;
+}
+
+function logCorreoAuditoriaMostrado(r: LogFila): string {
+	const c = typeof r.correo_electronico === "string" ? r.correo_electronico.trim() : "";
+	if (c !== "") {
+		return c;
+	}
+	const et = String(r.actor_etiqueta ?? "").trim();
+	if (et !== "" && et.toLowerCase() !== "sistema" && et.includes("@")) {
+		return et;
+	}
+	return "—";
 }
 
 function textoEstadoDoc(e: EstadoEntregaDocumentoUi, motivo: string | null): string {
@@ -2236,7 +2249,7 @@ export default function OrientadorGrupoAlumnosPage() {
 												<td className="max-w-[10rem] break-words px-2 py-2 text-slate-800">
 													<span className="text-[10px] uppercase text-slate-500">{r.actor_tipo}</span>
 													<br />
-													{r.actor_etiqueta}
+													{logCorreoAuditoriaMostrado(r)}
 												</td>
 												<td className="max-w-[11rem] break-words px-2 py-2 font-medium">{r.accion}</td>
 												<td className="max-w-[14rem] break-words px-2 py-2">

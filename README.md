@@ -2,6 +2,10 @@
 
 Landing con selector **Alumno / Orientador**, flujo **alumno** (clave → nombre/contraseña unificado), tablas en **Supabase sin Auth** (cuentas en SQL + sesión JWT en cookies), API de **nombre de archivo**, imágenes en `public/imagenes`.
 
+**Manual de instalación:** [docs/MANUAL_INSTALACION.md](docs/MANUAL_INSTALACION.md).
+
+**Uso de la aplicación y de la API (incluye dónde colocar capturas de pantalla):** [docs/USO_AIDA_Y_API.md](docs/USO_AIDA_Y_API.md).
+
 ## Requisitos
 
 - Node.js 20 LTS o superior

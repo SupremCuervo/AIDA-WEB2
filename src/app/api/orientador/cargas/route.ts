@@ -32,6 +32,10 @@ function parseFechaCierre(v: unknown): string | null {
 	return s;
 }
 
+function fechaSoloDia(v: string): string {
+	return v.trim().slice(0, 10);
+}
+
 function parseGruposLetras(raw: unknown): string[] {
 	if (typeof raw === "string") {
 		return raw
@@ -265,6 +269,7 @@ export async function POST(request: Request) {
 		fechaCierre?: unknown;
 		gradoCarga?: unknown;
 		alumnos?: unknown;
+		cargaId?: unknown;
 	};
 	try {
 		body = (await request.json()) as typeof body;
@@ -274,6 +279,8 @@ export async function POST(request: Request) {
 
 	const fechaCierre = parseFechaCierre(body.fechaCierre);
 	const gruposLetras = [...new Set(parseGruposLetras(body.gruposLetras))];
+	const cargaIdSolicitada =
+		typeof body.cargaId === "string" && body.cargaId.trim() !== "" ? body.cargaId.trim() : null;
 	const gradoCarga =
 		typeof body.gradoCarga === "number" && Number.isFinite(body.gradoCarga)
 			? Math.min(6, Math.max(1, Math.floor(body.gradoCarga)))
@@ -292,7 +299,7 @@ export async function POST(request: Request) {
 	}
 	const alumnos = deduplicarFilasCarga(filasParse);
 
-	if (!fechaCierre) {
+	if (!fechaCierre && !cargaIdSolicitada) {
 		return NextResponse.json({ error: "fechaCierre obligatoria (YYYY-MM-DD)" }, { status: 400 });
 	}
 	if (gruposLetras.length === 0) {
@@ -312,35 +319,82 @@ export async function POST(request: Request) {
 		return [...set].sort((a, b) => a.localeCompare(b, "es"));
 	}
 
-	const { data: cargaMismaFecha } = await supabase
-		.from("cargas_alumnos")
-		.select("id, grupos_letras")
-		.eq("orientador_id", orientador.orientadorId)
-		.eq("fecha_cierre", fechaCierre)
-		.eq("grado_carga", gradoCarga)
-		.order("creado_en", { ascending: false })
-		.limit(1)
-		.maybeSingle();
+	let cargaObjetivo: {
+		id: string;
+		fecha_cierre: string;
+		grado_carga: number;
+		grupos_letras: string[];
+	} | null = null;
 
-	const letrasPrevias = (cargaMismaFecha?.grupos_letras as string[] | undefined) ?? [];
+	if (cargaIdSolicitada) {
+		const { data: cargaById, error: errCargaById } = await supabase
+			.from("cargas_alumnos")
+			.select("id, fecha_cierre, grado_carga, grupos_letras, orientador_id")
+			.eq("id", cargaIdSolicitada)
+			.eq("orientador_id", orientador.orientadorId)
+			.maybeSingle();
+		if (errCargaById) {
+			console.error("orientador cargas POST cargaId", errCargaById);
+			return NextResponse.json({ error: "No se pudo validar la carga seleccionada" }, { status: 500 });
+		}
+		if (!cargaById?.id) {
+			return NextResponse.json(
+				{ error: "La carga seleccionada no existe o no pertenece al orientador." },
+				{ status: 404 },
+			);
+		}
+		cargaObjetivo = {
+			id: String(cargaById.id),
+			fecha_cierre: String(cargaById.fecha_cierre),
+			grado_carga: Number(cargaById.grado_carga),
+			grupos_letras: ((cargaById.grupos_letras as string[] | null) ?? []).map((x) => String(x)),
+		};
+	} else {
+		const { data: cargaMismaFecha } = await supabase
+			.from("cargas_alumnos")
+			.select("id, fecha_cierre, grado_carga, grupos_letras")
+			.eq("orientador_id", orientador.orientadorId)
+			.eq("fecha_cierre", fechaCierre)
+			.eq("grado_carga", gradoCarga)
+			.order("creado_en", { ascending: false })
+			.limit(1)
+			.maybeSingle();
+		if (cargaMismaFecha?.id) {
+			cargaObjetivo = {
+				id: String(cargaMismaFecha.id),
+				fecha_cierre: String(cargaMismaFecha.fecha_cierre),
+				grado_carga: Number(cargaMismaFecha.grado_carga),
+				grupos_letras: ((cargaMismaFecha.grupos_letras as string[] | null) ?? []).map((x) =>
+					String(x),
+				),
+			};
+		}
+	}
+
+	const fechaObjetivo = fechaSoloDia(cargaObjetivo?.fecha_cierre ?? fechaCierre ?? "");
+	if (!fechaObjetivo) {
+		return NextResponse.json({ error: "No se pudo determinar la fecha de cierre de la carga." }, { status: 400 });
+	}
+	const gradoObjetivo = cargaObjetivo?.grado_carga ?? gradoCarga;
+	const letrasPrevias = cargaObjetivo?.grupos_letras ?? [];
 	const letrasPrevNorm = letrasUnicasOrdenadas(letrasPrevias);
 	const mergedLetras = letrasUnicasOrdenadas([...letrasPrevNorm, ...gruposLetras]);
 
 	const tokenPorLetra = new Map<string, { tokenId: string; claveAcceso: string }>();
 
 	for (const g of mergedLetras) {
-		const ig = await institucionGrupoIdPorGradoLetra(supabase, gradoCarga, g);
+		const ig = await institucionGrupoIdPorGradoLetra(supabase, gradoObjetivo, g);
 		if (!ig) {
 			return NextResponse.json(
-				{ error: `No existe la sección ${gradoCarga}° grupo ${g} en el catálogo.` },
+				{ error: `No existe la sección ${gradoObjetivo}° grupo ${g} en el catálogo.` },
 				{ status: 400 },
 			);
 		}
 		const tok = await asegurarTokenParaSeccionCarga(supabase, {
 			institucionGrupoId: ig,
-			gradoCarga,
+			gradoCarga: gradoObjetivo,
 			letraGrupo: g,
-			fechaLimiteIso: fechaCierre,
+			fechaLimiteIso: fechaObjetivo,
 		});
 		if ("error" in tok) {
 			return NextResponse.json({ error: tok.error }, { status: 500 });
@@ -361,8 +415,8 @@ export async function POST(request: Request) {
 		let cargaId: string;
 		let cargaRecienCreada = false;
 
-		if (cargaMismaFecha?.id) {
-			cargaId = cargaMismaFecha.id as string;
+		if (cargaObjetivo?.id) {
+			cargaId = cargaObjetivo.id;
 			const { error: errUp } = await supabase
 				.from("cargas_alumnos")
 				.update({ grupos_letras: mergedLetras })
@@ -376,8 +430,8 @@ export async function POST(request: Request) {
 				.from("cargas_alumnos")
 				.insert({
 					orientador_id: orientador.orientadorId,
-					fecha_cierre: fechaCierre,
-					grado_carga: gradoCarga,
+					fecha_cierre: fechaObjetivo,
+					grado_carga: gradoObjetivo,
 					grupos_letras: mergedLetras,
 				})
 				.select("id")
@@ -409,7 +463,7 @@ export async function POST(request: Request) {
 			cargaRecienCreada = true;
 		}
 
-		const gradoStr = String(gradoCarga);
+		const gradoStr = String(gradoObjetivo);
 		let insertados = 0;
 
 		const tokensPorGrupo = mergedLetras.map((letter) => {
@@ -421,7 +475,7 @@ export async function POST(request: Request) {
 		});
 
 		for (const a of alumnos) {
-			const igId = await institucionGrupoIdPorGradoLetra(supabase, gradoCarga, a.grupoLetra);
+			const igId = await institucionGrupoIdPorGradoLetra(supabase, gradoObjetivo, a.grupoLetra);
 			const tok = tokenPorLetra.get(a.grupoLetra);
 			if (!igId || !tok) {
 				continue;
@@ -527,8 +581,8 @@ export async function POST(request: Request) {
 			fusionada: !cargaRecienCreada,
 			alumnosRegistrados: insertados,
 			tokensPorGrupo,
-			fechaCierre,
-			gradoCarga,
+			fechaCierre: fechaObjetivo,
+			gradoCarga: gradoObjetivo,
 		});
 	} catch (e) {
 		console.error("orientador cargas POST", e);

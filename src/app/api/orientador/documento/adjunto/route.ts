@@ -16,6 +16,7 @@ import {
 	esImagenConvertibleApdf,
 } from "@/lib/archivos/imagen-a-pdf-buffer";
 import { registrarLogApi } from "@/lib/orientador/audit-registrar";
+import { seccionGradoGrupoParaLogCuentaAlumno } from "@/lib/orientador/log-seccion-padron";
 import { mensajeCausaParaUsuario } from "@/lib/mensaje-red-amigable";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
@@ -237,12 +238,17 @@ export async function DELETE(request: Request) {
 		if (error) {
 			return NextResponse.json({ error: mensajeCausaParaUsuario(error) }, { status: 400 });
 		}
+		const secLog = await seccionGradoGrupoParaLogCuentaAlumno(supabase, cuentaId);
 		await registrarLogApi({
 			orientador,
 			accion: `Documento de orientador eliminado (${tipoDocumento})`,
 			entidad: "entregas_documento_alumno",
 			entidadId: cuentaId,
-			detalle: { cuenta_id: cuentaId, tipo_documento: tipoDocumento },
+			detalle: {
+				cuenta_id: cuentaId,
+				tipo_documento: tipoDocumento,
+				...secLog,
+			},
 		});
 		return NextResponse.json({ ok: true });
 	} catch (e) {

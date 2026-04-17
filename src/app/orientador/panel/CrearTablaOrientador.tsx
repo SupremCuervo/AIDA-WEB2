@@ -19,7 +19,7 @@ type AlumnoExp = {
 	tieneDocumentoAceptado?: boolean;
 };
 
-type FilaEditable = { id: string } & Record<ColKey, string>;
+type FilaEditable = { id: string; esManual?: boolean } & Record<ColKey, string>;
 
 const ORDEN_COLUMNAS: ColKey[] = ["grado", "grupo", "nombre", "carrera", "matricula"];
 
@@ -40,15 +40,70 @@ const COLUMNAS_INFORMACION: { key: ColKey; descripcion: string }[] = [
 	{ key: "grupo", descripcion: "Grupo (en tabla)" },
 ];
 
-function filaVacia(): FilaEditable {
+function filaVacia(esManual = false): FilaEditable {
 	return {
 		id: crypto.randomUUID(),
+		esManual,
 		grado: "",
 		grupo: "",
 		nombre: "",
 		carrera: "",
 		matricula: "",
 	};
+}
+
+/** Valor estable para opciones y comparación cuando el dato viene vacío. */
+function normalizaOpcionFiltro(raw: string | null | undefined): string {
+	const t = String(raw ?? "").trim();
+	return t === "" ? "(sin dato)" : t;
+}
+
+function valoresUnicosOpcion(candidatos: AlumnoExp[], clave: "grado" | "grupo" | "carreraNombre"): string[] {
+	const set = new Set<string>();
+	for (const a of candidatos) {
+		const raw = clave === "grado" ? a.grado : clave === "grupo" ? a.grupo : a.carreraNombre;
+		set.add(normalizaOpcionFiltro(raw));
+	}
+	return Array.from(set).sort((x, y) => x.localeCompare(y, "es"));
+}
+
+function pasaFiltrosValor(
+	a: AlumnoExp,
+	selGrados: string[],
+	selGrupos: string[],
+	selCarreras: string[],
+): boolean {
+	const g = normalizaOpcionFiltro(a.grado);
+	const gr = normalizaOpcionFiltro(a.grupo);
+	const c = normalizaOpcionFiltro(a.carreraNombre);
+	if (selGrados.length > 0 && !selGrados.includes(g)) {
+		return false;
+	}
+	if (selGrupos.length > 0 && !selGrupos.includes(gr)) {
+		return false;
+	}
+	if (selCarreras.length > 0 && !selCarreras.includes(c)) {
+		return false;
+	}
+	return true;
+}
+
+function filaDesdeAlumno(a: AlumnoExp): FilaEditable {
+	return {
+		...filaVacia(false),
+		grado: a.grado ?? "",
+		grupo: a.grupo ?? "",
+		nombre: a.nombreCompleto ?? "",
+		carrera: a.carreraNombre ?? "",
+		matricula: a.matricula ?? "",
+	};
+}
+
+function toggleEnListaOrdenada(prev: string[], valor: string): string[] {
+	if (prev.includes(valor)) {
+		return prev.filter((x) => x !== valor);
+	}
+	return [...prev, valor].sort((a, b) => a.localeCompare(b, "es"));
 }
 
 function escapeCsv(c: string): string {
@@ -91,6 +146,13 @@ export default function CrearTablaOrientador() {
 	const [reqDocsBase, setReqDocsBase] = useState("");
 
 	const [filas, setFilas] = useState<FilaEditable[]>([]);
+	const [candidatosPool, setCandidatosPool] = useState<AlumnoExp[]>([]);
+	const [opcionesGrado, setOpcionesGrado] = useState<string[]>([]);
+	const [opcionesGrupo, setOpcionesGrupo] = useState<string[]>([]);
+	const [opcionesCarrera, setOpcionesCarrera] = useState<string[]>([]);
+	const [selGrados, setSelGrados] = useState<string[]>([]);
+	const [selGrupos, setSelGrupos] = useState<string[]>([]);
+	const [selCarreras, setSelCarreras] = useState<string[]>([]);
 	const [cargando, setCargando] = useState(false);
 	const [error, setError] = useState("");
 
@@ -111,6 +173,19 @@ export default function CrearTablaOrientador() {
 		setIncluirColumna((prev) => ({ ...prev, [key]: !prev[key] }));
 	}, []);
 
+	useEffect(() => {
+		setFilas((prev) => {
+			const manuales = prev.filter((f) => f.esManual === true);
+			if (candidatosPool.length === 0) {
+				return manuales;
+			}
+			const filtrados = candidatosPool.filter((a) =>
+				pasaFiltrosValor(a, selGrados, selGrupos, selCarreras),
+			);
+			return [...filtrados.map(filaDesdeAlumno), ...manuales];
+		});
+	}, [candidatosPool, selGrados, selGrupos, selCarreras]);
+
 	const buscar = useCallback(async () => {
 		const algunaColumna = ORDEN_COLUMNAS.some((k) => incluirColumna[k]);
 		if (!algunaColumna) {
@@ -130,7 +205,14 @@ export default function CrearTablaOrientador() {
 			const data = (await res.json()) as { alumnos?: AlumnoExp[]; error?: string };
 			if (!res.ok) {
 				setError(data.error ?? "No se pudo cargar la información");
-				setFilas([]);
+				setCandidatosPool([]);
+				setOpcionesGrado([]);
+				setOpcionesGrupo([]);
+				setOpcionesCarrera([]);
+				setSelGrados([]);
+				setSelGrupos([]);
+				setSelCarreras([]);
+				setFilas((prev) => prev.filter((f) => f.esManual === true));
 				return;
 			}
 			// TODO(BD): mapear telefono, tutor, curp desde la respuesta cuando existan en API / padron.
@@ -156,21 +238,23 @@ export default function CrearTablaOrientador() {
 				}
 				return true;
 			});
-			const raw = candidatos.map((a) => ({
-				...filaVacia(),
-				grado: a.grado ?? "",
-				grupo: a.grupo ?? "",
-				nombre: a.nombreCompleto ?? "",
-				carrera: a.carreraNombre ?? "",
-				matricula: a.matricula ?? "",
-				telefono: "",
-				tutor: "",
-				curp: "",
-			}));
-			setFilas(raw);
+			setCandidatosPool(candidatos);
+			setOpcionesGrado(valoresUnicosOpcion(candidatos, "grado"));
+			setOpcionesGrupo(valoresUnicosOpcion(candidatos, "grupo"));
+			setOpcionesCarrera(valoresUnicosOpcion(candidatos, "carreraNombre"));
+			setSelGrados([]);
+			setSelGrupos([]);
+			setSelCarreras([]);
 		} catch {
 			setError("Error de red");
-			setFilas([]);
+			setCandidatosPool([]);
+			setOpcionesGrado([]);
+			setOpcionesGrupo([]);
+			setOpcionesCarrera([]);
+			setSelGrados([]);
+			setSelGrupos([]);
+			setSelCarreras([]);
+			setFilas((prev) => prev.filter((f) => f.esManual === true));
 		} finally {
 			setCargando(false);
 		}
@@ -185,7 +269,7 @@ export default function CrearTablaOrientador() {
 	}, []);
 
 	const agregarFila = useCallback(() => {
-		setFilas((prev) => [...prev, filaVacia()]);
+		setFilas((prev) => [...prev, filaVacia(true)]);
 	}, []);
 
 	const descargarExcel = useCallback(() => {
@@ -331,6 +415,107 @@ export default function CrearTablaOrientador() {
 									<option value="4">4 documentos</option>
 									<option value="5">5 documentos</option>
 								</select>
+							</div>
+							<div className="rounded-xl border border-[#E5E7EB] bg-white/90 p-3">
+								<p className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">
+									Por grado, grupo y carrera
+								</p>
+								<p className="mt-1 text-[11px] leading-snug text-[#6B7280]">
+									Tras pulsar Buscar aparecen los valores que vienen del padrón. Sin marcar nada en un bloque =
+									se muestran todos en ese criterio. Marca uno o varios para acotar la tabla y la exportación.
+								</p>
+								<div className="mt-3 space-y-3">
+									<div>
+										<p className="text-xs font-bold text-[#374151]">Grado</p>
+										{opcionesGrado.length === 0 ? (
+											<p className="mt-1 text-[11px] text-[#9CA3AF]">Sin datos hasta la próxima búsqueda.</p>
+										) : (
+											<>
+												<div className="mt-1 max-h-28 space-y-1 overflow-y-auto rounded-lg border border-[#E5E7EB] bg-[#FAFAFA] p-2">
+													{opcionesGrado.map((v) => (
+														<label key={v} className="flex cursor-pointer items-center gap-2 text-sm text-[#111827]">
+															<input
+																type="checkbox"
+																checked={selGrados.includes(v)}
+																onChange={() => setSelGrados((p) => toggleEnListaOrdenada(p, v))}
+																className="h-4 w-4 rounded border-[#A78BFA] text-[#7C3AED] focus:ring-[#A78BFA]"
+																style={{ accentColor: "#7C3AED" }}
+															/>
+															<span>{v}</span>
+														</label>
+													))}
+												</div>
+												<button
+													type="button"
+													onClick={() => setSelGrados([])}
+													className="mt-1 text-[11px] font-semibold text-[#6D28D9] underline-offset-2 hover:underline"
+												>
+													Quitar filtro de grado
+												</button>
+											</>
+										)}
+									</div>
+									<div>
+										<p className="text-xs font-bold text-[#374151]">Grupo</p>
+										{opcionesGrupo.length === 0 ? (
+											<p className="mt-1 text-[11px] text-[#9CA3AF]">Sin datos hasta la próxima búsqueda.</p>
+										) : (
+											<>
+												<div className="mt-1 max-h-28 space-y-1 overflow-y-auto rounded-lg border border-[#E5E7EB] bg-[#FAFAFA] p-2">
+													{opcionesGrupo.map((v) => (
+														<label key={v} className="flex cursor-pointer items-center gap-2 text-sm text-[#111827]">
+															<input
+																type="checkbox"
+																checked={selGrupos.includes(v)}
+																onChange={() => setSelGrupos((p) => toggleEnListaOrdenada(p, v))}
+																className="h-4 w-4 rounded border-[#A78BFA] text-[#7C3AED] focus:ring-[#A78BFA]"
+																style={{ accentColor: "#7C3AED" }}
+															/>
+															<span>{v}</span>
+														</label>
+													))}
+												</div>
+												<button
+													type="button"
+													onClick={() => setSelGrupos([])}
+													className="mt-1 text-[11px] font-semibold text-[#6D28D9] underline-offset-2 hover:underline"
+												>
+													Quitar filtro de grupo
+												</button>
+											</>
+										)}
+									</div>
+									<div>
+										<p className="text-xs font-bold text-[#374151]">Carrera</p>
+										{opcionesCarrera.length === 0 ? (
+											<p className="mt-1 text-[11px] text-[#9CA3AF]">Sin datos hasta la próxima búsqueda.</p>
+										) : (
+											<>
+												<div className="mt-1 max-h-28 space-y-1 overflow-y-auto rounded-lg border border-[#E5E7EB] bg-[#FAFAFA] p-2">
+													{opcionesCarrera.map((v) => (
+														<label key={v} className="flex cursor-pointer items-center gap-2 text-sm text-[#111827]">
+															<input
+																type="checkbox"
+																checked={selCarreras.includes(v)}
+																onChange={() => setSelCarreras((p) => toggleEnListaOrdenada(p, v))}
+																className="h-4 w-4 rounded border-[#A78BFA] text-[#7C3AED] focus:ring-[#A78BFA]"
+																style={{ accentColor: "#7C3AED" }}
+															/>
+															<span>{v}</span>
+														</label>
+													))}
+												</div>
+												<button
+													type="button"
+													onClick={() => setSelCarreras([])}
+													className="mt-1 text-[11px] font-semibold text-[#6D28D9] underline-offset-2 hover:underline"
+												>
+													Quitar filtro de carrera
+												</button>
+											</>
+										)}
+									</div>
+								</div>
 							</div>
 						</div>
 					</div>

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { argsRpcActorOrientador } from "@/lib/orientador/audit-registrar";
+import { registrarLogApi } from "@/lib/orientador/audit-registrar";
+import { seccionGradoGrupoParaLogPadron } from "@/lib/orientador/log-seccion-padron";
 import { obtenerClienteSupabaseAdmin } from "@/lib/supabase/admin";
 import { obtenerPayloadOrientador } from "@/lib/orientador/sesion-request";
 
@@ -27,6 +29,12 @@ export async function POST(request: Request) {
 
 	try {
 		const supabase = obtenerClienteSupabaseAdmin();
+		const { data: alumno } = await supabase
+			.from("padron_alumnos")
+			.select("nombre_completo")
+			.eq("id", padronId)
+			.maybeSingle();
+		const nombreAlumno = String(alumno?.nombre_completo ?? "").trim();
 		const { data, error } = await supabase.rpc("aud_reactivar_padron", {
 			p_padron_id: padronId,
 			...argsRpcActorOrientador(orientador),
@@ -44,6 +52,22 @@ export async function POST(request: Request) {
 				{ status: 404 },
 			);
 		}
+		const idFinal = res.padronId ?? padronId;
+		const secLog = await seccionGradoGrupoParaLogPadron(supabase, idFinal);
+		await registrarLogApi({
+			orientador,
+			accion:
+				nombreAlumno !== ""
+					? `Reactivacion expediente - ${nombreAlumno}`
+					: `Reactivacion expediente - Sin nombre`,
+			entidad: "padron_alumnos",
+			entidadId: idFinal,
+			detalle: {
+				padron_id: idFinal,
+				nombre_completo: nombreAlumno || null,
+				...secLog,
+			},
+		});
 		return NextResponse.json({ ok: true, padronId: res.padronId ?? padronId });
 	} catch (e) {
 		console.error("reactivar", e);

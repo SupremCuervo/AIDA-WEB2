@@ -31,6 +31,63 @@ type DocEstatus = {
 	tieneArchivo: boolean;
 };
 
+/** Texto dentro de cada recuadro del modal «Verificar archivos subidos». */
+function mensajeEstadoDocumentoEnTarjeta(doc: DocEstatus): {
+	titulo: string;
+	detalle: string;
+	claseFondo: string;
+	claseBorde: string;
+	claseTitulo: string;
+} {
+	if (!doc.tieneArchivo) {
+		return {
+			titulo: "Sin archivo",
+			detalle: "Este documento aún no tiene archivo subido por el alumno.",
+			claseFondo: "bg-slate-100",
+			claseBorde: "border-slate-200",
+			claseTitulo: "text-slate-700",
+		};
+	}
+	const e = (doc.estado ?? "").trim().toLowerCase();
+	switch (e) {
+		case "validado":
+			return {
+				titulo: "Documento aceptado",
+				detalle: "Marcaste este archivo como correcto; el alumno lo verá como aceptado.",
+				claseFondo: "bg-emerald-50",
+				claseBorde: "border-emerald-200",
+				claseTitulo: "text-emerald-900",
+			};
+		case "rechazado":
+			return {
+				titulo: "Documento rechazado",
+				detalle: "Marcaste este archivo como incorrecto; el alumno podrá subir otro archivo.",
+				claseFondo: "bg-red-50",
+				claseBorde: "border-red-200",
+				claseTitulo: "text-red-900",
+			};
+		case "pendiente_revision_manual":
+			return {
+				titulo: "Pendiente de tu revisión",
+				detalle: "El alumno ya subió archivo: usa ✓ para aceptar o ✕ para rechazar.",
+				claseFondo: "bg-amber-50",
+				claseBorde: "border-amber-200",
+				claseTitulo: "text-amber-900",
+			};
+		default:
+			return {
+				titulo: "Archivo registrado",
+				detalle:
+					e !== ""
+						? `Estado en sistema: ${e}. Revisa con ✓ o ✕ si aplica.`
+						: "Hay archivo asociado; revisa con ✓ o ✕ si aplica.",
+				claseFondo: "bg-slate-50",
+				claseBorde: "border-slate-200",
+				claseTitulo: "text-slate-800",
+			};
+	}
+}
+
 function fechaInputDesdeIso(iso: string | null | undefined): string {
 	if (!iso || typeof iso !== "string") {
 		return "";
@@ -118,8 +175,13 @@ function descargarTxtClavesGrupos(
 	URL.revokeObjectURL(url);
 }
 
-/** Vista de carga actual (filtro de periodo + grado) para filtrar tokens en el modal. `null` = sin carga en contexto. */
-export type ContextoModalTokensCargas = { fechaCierre: string; gradoCarga: number } | null;
+/** Vista de carga actual para filtrar tokens en el modal. `null` = sin carga en contexto. */
+export type ContextoModalTokensCargas = {
+	fechaCierre: string;
+	gradoCarga: number;
+	cargaId: string;
+	gruposLetras: string[];
+} | null;
 
 type PropsCargasPeriodos = {
 	modo: ModoPanel;
@@ -189,6 +251,7 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 	const [filtroFechaVista, setFiltroFechaVista] = useState("");
 	const [vistaCargaTick, setVistaCargaTick] = useState(0);
 	const [cargaIdSubSeleccion, setCargaIdSubSeleccion] = useState<string | null>(null);
+	const [cargaIdCrearExistente, setCargaIdCrearExistente] = useState("");
 	const [cargaVistaFiltrada, setCargaVistaFiltrada] = useState<{
 		carga: CargaListaItem;
 		lineasPorGrupo: Record<string, LineaAlumno[]>;
@@ -515,6 +578,7 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 					fechaCierre: fechaNormCrear,
 					gradoCarga: 1,
 					alumnos,
+					cargaId: cargaIdCrearExistente || undefined,
 				}),
 			});
 			const data = (await res.json()) as {
@@ -606,6 +670,7 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 			setErrorMsg(d.error ?? "No se pudo actualizar");
 			return;
 		}
+		setErrorMsg("");
 		if (verDocs) {
 			await abrirVerDocumentos(verDocs.nombre, verDocs.padronId, verDocs.cuentaId);
 		}
@@ -900,6 +965,25 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 		return s;
 	}, [historial, fechaCierreNormFormulario]);
 
+	const cargasEnFechaFormulario = useMemo(() => {
+		if (!fechaCierreNormFormulario) {
+			return [] as CargaListaItem[];
+		}
+		return cargasPorFechaCierre.get(fechaCierreNormFormulario) ?? [];
+	}, [fechaCierreNormFormulario, cargasPorFechaCierre]);
+
+	useEffect(() => {
+		if (cargasEnFechaFormulario.length === 0) {
+			if (cargaIdCrearExistente !== "") {
+				setCargaIdCrearExistente("");
+			}
+			return;
+		}
+		if (!cargaIdCrearExistente || !cargasEnFechaFormulario.some((c) => c.id === cargaIdCrearExistente)) {
+			setCargaIdCrearExistente(cargasEnFechaFormulario[0]?.id ?? "");
+		}
+	}, [cargasEnFechaFormulario, cargaIdCrearExistente]);
+
 	const candidatosFechaVista = useMemo(() => {
 		if (!filtroFechaVista) {
 			return [];
@@ -933,7 +1017,12 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 			if (!fc) {
 				return null;
 			}
-			return { fechaCierre: fc, gradoCarga: cargaActual.carga.gradoCarga };
+			return {
+				fechaCierre: fc,
+				gradoCarga: cargaActual.carga.gradoCarga,
+				cargaId: cargaActual.carga.id,
+				gruposLetras: cargaActual.carga.gruposLetras ?? [],
+			};
 		}
 		const cand = candidatosFechaVista;
 		if (cand.length === 0) {
@@ -948,7 +1037,12 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 		if (!fc) {
 			return null;
 		}
-		return { fechaCierre: fc, gradoCarga: sel.gradoCarga };
+		return {
+			fechaCierre: fc,
+			gradoCarga: sel.gradoCarga,
+			cargaId: sel.id,
+			gruposLetras: sel.gruposLetras ?? [],
+		};
 	}, [modo, filtroFechaVista, cargaActual, candidatosFechaVista, cargaIdResueltoVista]);
 
 	const vistaParaLista = useMemo(() => {
@@ -1190,6 +1284,28 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 					</div>
 				</div>
 			) : null}
+			{cargasEnFechaFormulario.length > 0 ? (
+				<div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/80 px-3 py-2">
+					<label className="block text-xs font-semibold text-violet-900" htmlFor="aida-carga-existente-select">
+						Carga existente a ampliar (misma fecha)
+					</label>
+					<select
+						id="aida-carga-existente-select"
+						value={cargaIdCrearExistente}
+						onChange={(e) => setCargaIdCrearExistente(e.target.value)}
+						className="mt-1 w-full rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm text-slate-900"
+					>
+						{cargasEnFechaFormulario.map((c) => (
+							<option key={c.id} value={c.id}>
+								{`${formatearFechaMostrar(c.creadoEn)} · grupos: ${(c.gruposLetras ?? []).join(", ") || "—"}`}
+							</option>
+						))}
+					</select>
+					<p className="mt-1 text-[11px] text-violet-800">
+						Al crear, se agregan grupos/alumnos a esta carga y se conserva su fecha de cierre.
+					</p>
+				</div>
+			) : null}
 			<div className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-md">
 				<div className="flex flex-wrap items-center gap-2">
 					{letrasCrear.map((l) => {
@@ -1288,11 +1404,49 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 			<h2 className="text-center text-xl font-bold text-slate-900 sm:text-2xl lg:text-left">Carga de alumnos</h2>
 			<div className="mt-4 w-full px-0">
 				<div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-end sm:gap-4">
+					<label className="flex min-w-[12rem] flex-1 flex-col gap-1 text-xs font-semibold text-slate-700">
+						Fecha de carga visible
+						<select
+							value={filtroFechaVista}
+							onChange={(e) => {
+								setFiltroFechaVista(e.target.value);
+								setCargaIdSubSeleccion(null);
+								setVistaCargaTick((t) => t + 1);
+							}}
+							className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+						>
+							<option value="">Ultima carga</option>
+							{fechasCierreExistentes.map((f) => (
+								<option key={f} value={f}>
+									{formatearFechaMostrar(f)}
+								</option>
+							))}
+						</select>
+					</label>
+					{filtroFechaVista ? (
+						<label className="flex min-w-[14rem] flex-1 flex-col gap-1 text-xs font-semibold text-slate-700">
+							Carga
+							<select
+								value={cargaIdResueltoVista ?? ""}
+								onChange={(e) => {
+									setCargaIdSubSeleccion(e.target.value || null);
+									setVistaCargaTick((t) => t + 1);
+								}}
+								className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+							>
+								{candidatosFechaVista.map((c) => (
+									<option key={c.id} value={c.id}>
+										{`Creada ${formatearFechaMostrar(c.creadoEn)} · grupos ${(c.gruposLetras ?? []).join(", ")}`}
+									</option>
+								))}
+							</select>
+						</label>
+					) : null}
 					{onAbrirModalTokens ? (
 						<button
 							type="button"
 							onClick={() => onAbrirModalTokens(contextoModalTokensDesdeVista)}
-							title="Claves por grupo de la última carga registrada"
+							title="Claves por grupo de la carga visible"
 							className="shrink-0 rounded-xl border-2 border-[#6D28D9] bg-[#EDE9FE] px-5 py-2.5 text-sm font-bold text-[#5B21B6] shadow-sm transition hover:bg-[#DDD6FE] sm:mb-px"
 						>
 							Tokens
@@ -1634,11 +1788,28 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 						</button>
 						<h3 className="mt-2 text-center text-xl font-bold">Verificar Archivos subidos por el alumno</h3>
 						<p className="text-center text-slate-700">{verDocs.nombre}</p>
+						{errorMsg.trim() !== "" ? (
+							<p className="mx-auto mt-3 max-w-2xl rounded-lg bg-red-50 px-3 py-2 text-center text-sm text-red-700">
+								{errorMsg}
+							</p>
+						) : null}
 						<div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
 							<div className="grid gap-4 sm:grid-cols-2">
-								{verDocs.documentos.map((doc) => (
+								{verDocs.documentos.map((doc) => {
+									const estadoTarjeta = mensajeEstadoDocumentoEnTarjeta(doc);
+									return (
 									<div key={doc.tipo} className="rounded-xl border border-slate-200 p-4 shadow-sm">
 										<p className="text-center font-bold text-slate-900">{doc.etiqueta}</p>
+										<div
+											className={`mt-3 rounded-lg border px-3 py-2.5 text-left ${estadoTarjeta.claseFondo} ${estadoTarjeta.claseBorde}`}
+											role="status"
+											aria-live="polite"
+										>
+											<p className={`text-sm font-bold ${estadoTarjeta.claseTitulo}`}>
+												{estadoTarjeta.titulo}
+											</p>
+											<p className="mt-1 text-xs leading-snug text-slate-700">{estadoTarjeta.detalle}</p>
+										</div>
 										<div className="mt-3 flex min-h-[140px] flex-col items-center justify-center rounded-lg border border-slate-200 bg-slate-50 p-3">
 											{doc.tieneArchivo ? (
 												<button
@@ -1674,7 +1845,8 @@ export default function CargasPeriodosOrientador({ modo, onAbrirModalTokens }: P
 											</button>
 										</div>
 									</div>
-								))}
+									);
+								})}
 							</div>
 							<div ref={previewRef} className="rounded-xl border border-slate-300 bg-slate-100 p-2">
 								<p className="mb-2 text-sm font-semibold text-slate-700">

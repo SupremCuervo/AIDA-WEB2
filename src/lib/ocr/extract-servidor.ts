@@ -103,7 +103,7 @@ async function ocrExtract(
 	fd.append("tramite", tramite);
 	fd.append("lang", "spa");
 	fd.append("use_ocr_space_fallback", "true");
-	fd.append("aplicar_preproceso_ocr", "true");
+	fd.append("aplicar_preproceso_ocr", "false");
 	fd.append("aplicar_saturacion_hsv", "true");
 	const controller = new AbortController();
 	const t = setTimeout(() => controller.abort(), timeoutMsOcrServidor());
